@@ -1,0 +1,22 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding to your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+Given that you have now seized the chance to use your ability,
+{ability_target_info}
+
+If you wish to use your ability, please indicate:
+- your target(s) or required parameters (e.g. family, player name, direction, etc.), ONLY from the options provided to you
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "reasoning": "string"  // Explain in-character your reasoning on which target(s) to use your ability on in one or two sentences. Avoid using violent or harmful language.
+- "target": "string"                // Target, ONLY from the options provided to you, exactly as is

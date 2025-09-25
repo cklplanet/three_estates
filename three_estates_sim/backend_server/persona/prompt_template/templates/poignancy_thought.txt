@@ -1,0 +1,9 @@
+{PREFIX}
+{personal_game_context}
+
+On the scale of 1 to 10, where 1 is purely mundane and not directly related to the game (e.g., she's a bit too chatty is all) and 10 is extremely significant to the game regarding your or other's identity or win conditions (e.g. this guy literally is this close to winning and it will be extra beneficial for me as well, therefore I should help him), rate the likely significance of the following thought for you as a player in the game.
+
+Thought: {thought_desp}
+
+The output should ONLY contain ONE integer value on the scale of 1 to 10.
+Rate (return a number between 1 to 10):

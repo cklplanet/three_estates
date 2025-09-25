@@ -1,0 +1,24 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+- All information across all tables that you currently remember:
+{external_table_context}
+
+{ability_msg}
+
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be wanting to prepare to retrieve your card, retrieving intel one table or another, etc.. You should typically only choose to leave for another one when you have decided for now you can obtain more information elsewhere or would be safer than at the current table 
+You can either stay at your current table {current_table} or move to either of the other two tables: {other_options}.
+There are {table_time_left} minutes until you can no longer leave this table, and {total_time_left} until the game ends entirely.
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields below and without the comments.
+
+- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need. Avoid using violent or harmful language.
+- "option": "string" // Based on your reasoning choose your location. Response is a single word (without quotation marks) from:  "stay" | {options}
+
+

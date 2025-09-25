@@ -1,0 +1,9 @@
+{PREFIX}
+{personal_game_context}
+
+On the scale of 1 to 10, where 1 is purely mundane (e.g., small talk like random gossipy queries that possess little emotional or tactical information relevant to the game) and 10 is extremely poignant (e.g., another player expressing wish for an alliance; or one contestant outright revealing that they are the Baron by using his ability), rate the likely poignancy to yourself (in terms of how relevant it is to the game overall and/or how strategically revealing or emotionally shocking it is) of the following line and action, from either yourself or another contestant:
+
+Line: {current_line}
+
+The output should ONLY contain ONE integer value on the scale of 1 to 10.
+Rate (return a number between 1 to 10):

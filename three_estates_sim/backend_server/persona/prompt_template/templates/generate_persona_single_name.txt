@@ -1,0 +1,20 @@
+You are generating the profile of a character for use in a turn-based agent simulation of a social deduction game. The simulation includes personality-based spoken lines and action decision loops.
+
+Given that the assumed context for this character and other characters in the same game simulation is: {character_group_context}, and that it calls for characters with only one name (aka no first/last name distinctions)
+You must fill out the below dictionary, formatted exactly like below with no empty lines:
+
+name:
+gender: male or female, all lower case
+age: integer
+innate: (one paragraph or two in third person totalling no more than 100 words explaining their background in the context of the broader context and core personality, especially related to dialogue, chain of thought, temperament, or degree of suspicion.)
+{existing_character_choices}
+
+Example output (with brackets removed):
+  "name": "Akebono",
+  "gender": "female",
+  "age": 17,
+  "innate": "is a spirited and energetic Fubuki-class destroyer, known for her fiery temper and blunt honesty. She often speaks her mind without filter, which can come off as abrasive but stems from a deep sense of duty and loyalty. Despite her rough exterior, she cares deeply for her comrades and is quick to defend them. Her suspicion of others is high, especially newcomers, and she relies on gut feelings to gauge trustworthiness. In dialogue, she’s direct and sometimes confrontational, but her actions are driven by a desire to protect the fleet. She dislikes deceit and will call it out immediately."
+
+Return ONLY the dictionary which MUST be in proper python dictionary format INCLUDING brackets — no extra text or explanations.
+
+

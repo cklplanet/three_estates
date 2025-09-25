@@ -1,0 +1,38 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding to your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{other_table_additional_context}
+
+Given that {stay_at_table_reason}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
+- Speak (truthfully, misleadingly, strategically, or just casually)
+- Reveal your card
+- React to others' actions or provocations
+{ability_msg}
+
+For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, how urgently you want to reveal (without even using your ability) your card and role to everyone at your current table in particular. For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first.
+- BID OPTIONS:
+  0: Either: I will not reveal my card. No benefit, and it may backfire or make me a target. Or: I have already revealed my card to the same people at the table and there haven't been anyone new coming in the meantime yet.
+  1: I’m slightly open to revealing if prompted or if it builds light trust, but there’s no real gain yet. I would rather converse normally to gauge the situation.
+  2: Revealing and proving it could shift how people treat me or believe me — especially useful if I want to bluff or signal alignment.
+  3: There’s enough suspicion or pressure that revealing would change the table dynamic or help activate an ability chain.
+  5: I must urgently reveal to disprove a false claim, secure an ability trigger, or publicly pivot perception to directly help my win condition; or someone else has asked for my reveal and it just happens to be in my advantage to comply right now. Any delay is dangerous.
+- There are {total_time_left} until the game ends entirely.
+
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "reasoning": "string",  // How crucial is it for you to reveal your card and role right now? Explain in-character your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "1" | "2" | "3" | "5" (numbers EXACTLY as shown, NOT continuous)
+

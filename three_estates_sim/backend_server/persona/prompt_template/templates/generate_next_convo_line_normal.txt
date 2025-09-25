@@ -1,0 +1,33 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding to your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{ability_msg}
+
+Given that {stay_at_table_reason}, and that you have now seized the chance to respond verbally because of the internal reasoning "{speech_reason}", please assess the current situation and decide exactly what you want to say, and to the entire table or directed at one other player at the table to IMMEDIATELY add to the conversation. Depending on what your personality is inclined towards, you may potentially: 
+- Speak truthfully and analytically
+- Deflect suspicion off yourself or allies and/or towards enemies
+- Question the veracity of others' role "reveals" through words only that don't come with actual proper reveals of their card
+- Bluff or lie about your or others' roles (like for example bullshitting about being the Innkeeper)
+- React to others' actions or provocations
+- Or just be laconic and cryptic and throw everyone else at the table off
+- Optionally, you can weaponize the fact that practically screaming voices CAN be potentially heard by other tables in all of the ways above
+- There are {total_time_left} until the game ends entirely.
+
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "object": "string", // the object you're going to speak to. can be either exactly "everyone" (output "everyone" exactly as is in this field in this case, all lowercase) or any other name (exactly as is including the capitalizations) at the table
+- "volume": "string", // one option from (exactly as is, all lowercase) "whisper" "calm" "loud" or "practically screaming"
+- "line": "string" // Your spoken response. Can go from extremely laconic to slightly detailed but keep it moderately short in general

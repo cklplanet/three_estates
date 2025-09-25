@@ -1,0 +1,14 @@
+You are generating additional information between two characters (apart from many others in the same simulation) for use in a turn-based agent simulation of a social deduction game. The simulation includes personality-based spoken lines and action decision loops.
+
+Given that the assumed context for this character and other characters in the same game simulation is: {character_group_context}
+And that the first character in question with is:
+{character_1_information}
+And the second character in question is:
+{character_2_information}
+You must now within 120 words, come up with summary and information of the history between these two characters to inform interactions between them in the simulation. For example, are they friends or rivals of any kind, which kind, and at which point(s) did it start? Alternatively, if it makes sense for the group context, are they in a romantic relationship (or in the amicable phase before a formal relationship), and how deeply? In either case are their one-sided or double-sided dynamics going on?
+Example: Julien and Chiara met during a joint lab course in their second semester and gradually bonded over a shared sense of humor and late-night work sessions. After several months of casual but frequent conversations, they began spending more time together outside class, attending EPFL events and exploring Lausanne. They recently started dating, and while still figuring each other out, there’s a gentle comfort building between them. Julien is more reserved, which makes Chiara take the lead in most conversations, but she enjoys teasing him out of his shell. Their interactions now carry subtle mutual awareness, with both still adjusting to the new dynamic but clearly invested.
+
+
+Return ONLY your textual answer — no extra text or explanations.
+
+

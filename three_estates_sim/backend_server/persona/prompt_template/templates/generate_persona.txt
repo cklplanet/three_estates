@@ -1,0 +1,24 @@
+You are generating the profile of a character for use in a turn-based agent simulation of a social deduction game. The simulation includes personality-based spoken lines and action decision loops.
+
+Given that the assumed context for this character and other characters in the same game simulation is: {character_group_context}
+You must fill out the below dictionary, formatted exactly like below with no empty lines:
+
+name:
+first_name:
+last_name:
+gender: male or female, all lower case
+age: integer
+innate: (one paragraph or two in third person totalling no more than 100 words explaining their background in the context of the broader context and core personality, especially related to dialogue, chain of thought, temperament, or degree of suspicion.)
+{existing_character_choices}
+
+Example output (with brackets removed):
+  "name": "Julien Mercier",
+  "first_name": "Julien",
+  "last_name": "Mercier",
+  "gender": "male",
+  "age": 23,
+  "innate": "is a French-speaking master's student in computer science at EPFL, known among his peers for his calm demeanor and dry wit. Originally from Lausanne, he’s naturally observant and tends to speak only when he feels something important is being missed. He dislikes confrontation, but is analytical and quietly suspicious of inconsistencies in others’ behavior. In dialogue, he rarely raises his voice, often asking sharp questions that sound casual at first. He prefers to think a few steps ahead, which makes him cautious but deliberate in action."
+
+Return ONLY the dictionary which MUST be in proper python dictionary format INCLUDING brackets — no extra text or explanations.
+
+
