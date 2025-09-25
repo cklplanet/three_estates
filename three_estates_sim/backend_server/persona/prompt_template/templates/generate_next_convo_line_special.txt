@@ -1,0 +1,33 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding to your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{ability_msg}
+
+Given that {special_circumstance}, please decide exactly what you want to say IMMEDIATELY to accompany your move. Depending on what your personality is inclined towards, you may potentially, among other choices: 
+- Be neutral, analytical, or earnest
+- Be smug
+- Convey whatever immediate emotions you have, surprise, anger, dread, joy, etc
+- Be threatening or accusatory
+- Or be laconic and cryptic
+- Additionally, you can weaponize the fact that loud voices CAN be potentially heard by other tables
+
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Avoid using violent or harmful language.
+- "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
+- "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
+- "line": "string" // Your spoken accompanying line. Keep it moderately short in general.
+

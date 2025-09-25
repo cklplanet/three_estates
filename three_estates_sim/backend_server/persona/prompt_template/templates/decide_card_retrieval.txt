@@ -1,0 +1,27 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding to your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{other_table_additional_context}
+
+{ability_msg}
+
+Given that {stay_at_table_reason}, please assess the current situation and decide whether or not you want to retrieve your card. 
+There are {total_time_left} until the game ends entirely.
+
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "reasoning": "string",  // How crucial is it for you to retrieve your card right now? Explain in-character your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "result": "string" // exactly "yes" or "no", all lowercase
