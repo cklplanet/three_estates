@@ -12,7 +12,7 @@ env_visuals = f"{maze_assets_loc}/the_ville/visuals"
 fs_storage = "../../environment/frontend_server/storage"
 fs_temp_storage = "../../environment/frontend_server/temp_storage"
 
-save_file = "/Users/cklplanet/Desktop/work2/three_estates/three_estates_sim/sessions/kancolle1"
+save_file = "/Users/kailechu/Desktop/work2/three_estates/three_estates_sim/sessions/kancolle1"
 
 collision_block_id = "32125"
 
