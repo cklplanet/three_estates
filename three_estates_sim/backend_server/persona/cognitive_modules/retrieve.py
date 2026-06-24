@@ -4,7 +4,8 @@ File: retrieve.py
 Description: This defines the "Retrieve" module for generative agents. 
 """
 import sys
-sys.path.append('../../')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from global_methods import *
 from persona.prompt_template.gpt_structure import *

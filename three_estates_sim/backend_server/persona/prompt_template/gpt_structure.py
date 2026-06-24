@@ -3,6 +3,7 @@ from openai import OpenAI
 import time 
 from sentence_transformers import SentenceTransformer
 from utils import *
+from paths import resolve_backend_file
 
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -39,6 +40,7 @@ def generate_prompt(curr_input, prompt_lib_file):
     curr_input = [curr_input]
   curr_input = [str(i) for i in curr_input]
 
+  prompt_lib_file = resolve_backend_file(prompt_lib_file)
   f = open(prompt_lib_file, "r")
   prompt = f.read()
   f.close()
@@ -52,12 +54,17 @@ def generate_prompt(curr_input, prompt_lib_file):
 def ChatGPT_request(prompt):
     try:
         completion = client.chat.completions.create(
-            model="deepseek/deepseek-chat-v3-0324",
+            #model="deepseek/deepseek-chat-v3-0324",
+            model="openai/gpt-5.5",
             #model="openai/gpt-4.1",
             messages=[{"role": "user", "content": prompt}]
         )
+        print(completion.choices[0].message.content)
         return completion.choices[0].message.content
     except Exception:
+        # print the actual exception
+        import traceback
+        traceback.print_exc()
         print("ChatGPT ERROR")
         return "ChatGPT ERROR"
   

@@ -1,6 +1,6 @@
 #### #### Work in progress ####
 For now use
-```python3 server.py```
+```python3 three_estates_sim/server.py```
 for demos
 
 ###### Partially adapted from [Generative Agents: Interactive Simulacra of Human Behavior](https://arxiv.org/abs/2304.03442) and [Werewolf Arena: A Case Study in LLM Evaluation via Social Deduction](https://arxiv.org/abs/2407.13943)

@@ -5,7 +5,8 @@ File: reflect.py
 Description: This defines the "Reflect" module for generative agents. 
 """
 import sys
-sys.path.append('../../')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import datetime
 import random
@@ -26,9 +27,9 @@ def generate_poig_score(persona, event_type, description):
     return 1
 
   if event_type == "event" or event_type == "thought": 
-    return run_gpt_prompt_event_poignancy(persona, description)[0]
+    return bounded_int(prompt_payload(run_gpt_prompt_event_poignancy(persona, description), 1), 1, minimum=1, maximum=10)
   elif event_type == "chat": 
-    return run_gpt_prompt_chat_poignancy(persona, description)[0]
+    return bounded_int(prompt_payload(run_gpt_prompt_chat_poignancy(persona, description), 1), 1, minimum=1, maximum=10)
 
 
 
@@ -86,8 +87,14 @@ def run_reflect(persona):
         retrieved = new_retrieve(persona, [focal_point])
         # TODO: note: new_retrieve retrieves thoughts possibly from older times. might want to change for further iterations
         subject_events = filter_nonoverlapping_events(retrieved, subject_nodes)
-        thought_dict = run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts, focal_point)[0]["summary"]
-        thought = thought_dict['summary']
+        thought_dict = prompt_dict(
+          run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts, focal_point),
+          {
+            "reasoning": "I do not have enough reliable new evidence to revise this belief.",
+            "summary": f"I do not yet have a confident read on {subject}."
+          }
+        )
+        thought = thought_dict["summary"]
         thought_embedding_pair = (thought, get_embedding(thought))
         created = persona.scratch.curr_time
         expiration = persona.scratch.curr_time + datetime.timedelta(days=30)
@@ -106,8 +113,14 @@ def run_reflect(persona):
       # EVERY thought relevant to me
       retrieved = new_retrieve(persona, [focal_point])
       my_relevant_events = filter_nonoverlapping_events(retrieved, my_nodes)
-      thought_dict = run_gpt_prompt_reflect_on_subject(persona, my_relevant_events, my_relevant_thoughts, focal_point)[0]["summary"]
-      persona.scratch.win_progress = thought
+      thought_dict = prompt_dict(
+        run_gpt_prompt_reflect_on_subject(persona, my_relevant_events, my_relevant_thoughts, focal_point),
+        {
+          "reasoning": "I do not have enough reliable new evidence to update my progress.",
+          "summary": "I am still assessing whether my current table helps my win condition."
+        }
+      )
+      persona.scratch.win_progress = thought_dict["summary"]
   
     
 
