@@ -8,7 +8,8 @@ Note (May 1, 2023) -- this class is the Memory Stream module in the generative
 agents paper. 
 """
 import sys
-sys.path.append('../../')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import json
 import datetime

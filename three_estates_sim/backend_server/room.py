@@ -15,6 +15,7 @@ class Location:
         self.revealed_cards = []
         self.events = set()        # events (and events corresponding to objects) happening at this location? maybe?
         self.current_lines = [] # format: list of ((subject, object, volume, contents, timestamp, keywords))
+        self.dialogue_history = [] # append-only dialogue lines for perception/logging
         self.current_events = [] # format: list of ((subject, object, act_desp, timestamp, keywords))
         self.personas = dict()
         self.removal_targets = set() # format: (sub, obj, subj_role, target_table)
@@ -38,10 +39,13 @@ class Location:
     
     def add_table_event(self, event_tuple):
         self.current_events.append(event_tuple)
+        write_table_event_log(self.name, event_tuple)
         print(f"({self.name})" + event_tuple[2])
     
     def add_table_dialogue(self, dialogue_tuple):
         self.current_lines.append(dialogue_tuple)
+        self.dialogue_history.append(dialogue_tuple)
+        write_dialogue_log(self.name, dialogue_tuple)
         print(f"({self.name})" + dialogue_tuple[0] + f"(to {dialogue_tuple[1]}):" + f" ({dialogue_tuple[2]})" + f" {dialogue_tuple[3]}")
 
 

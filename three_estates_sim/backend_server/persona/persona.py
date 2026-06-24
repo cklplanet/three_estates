@@ -13,7 +13,8 @@ import sys
 import datetime
 import random
 import os
-sys.path.append('../')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from global_methods import *
 
@@ -133,19 +134,52 @@ class Persona:
 
   def speak(self, table, special_circumstance=None):
     self.update_knowledge(self.room)
+    default_line = {
+      "object": "everyone",
+      "volume": "calm",
+      "line": "I need a moment to think this through.",
+    }
     if special_circumstance:
-      speak_dict = run_gpt_prompt_generate_next_convo_line_special(self, table, special_circumstance)[0]
-      table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
+      speak_dict = prompt_dict(run_gpt_prompt_generate_next_convo_line_special(self, table, special_circumstance), default_line)
     else:
-      speak_dict = run_gpt_prompt_generate_next_convo_line_normal(self, table)[0]
-      table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
+      speak_dict = prompt_dict(run_gpt_prompt_generate_next_convo_line_normal(self, table), default_line)
+    if speak_dict["object"] not in table.personas and speak_dict["object"] != "everyone":
+      speak_dict["object"] = "everyone"
+    if speak_dict["volume"] not in {"whisper", "calm", "loud", "practically screaming"}:
+      speak_dict["volume"] = "calm"
+    table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
+    self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
 
   def select_ability_target(self, table):
-    return run_gpt_prompt_select_ability_target(self, table)[0]["target"]
+    possible_targets = list(set(table.personas.keys()) - {self.scratch.name})
+    if self.scratch.role == "King":
+      fallback = ROLE_DICT[self.scratch.role]["family"]
+      family_options = {ROLE_DICT[player.scratch.role]["family"] for player in table.personas.values()}
+      target_dict = prompt_dict(run_gpt_prompt_select_ability_target(self, table), {"target": fallback})
+      return target_dict["target"] if target_dict["target"] in family_options else fallback
+    fallback = possible_targets[0] if possible_targets else self.scratch.name
+    target_dict = prompt_dict(run_gpt_prompt_select_ability_target(self, table), {"target": fallback})
+    return target_dict["target"] if target_dict["target"] in possible_targets else fallback
+
+  def guess_family_bishop(self, target, table):
+    return prompt_dict(
+      run_gpt_prompt_guess_family_bishop(self, target, table),
+      {"reasoning": "I have to make my best guess from limited evidence.", "guess": "Commoners"}
+    )
+
+  def select_ability_destination(self, table, retrieved_all_tables, special_circumstance):
+    fallback = next(iter(set(retrieved_all_tables.keys()) - {table.name}), table.name)
+    destination_dict = prompt_dict(
+      run_gpt_prompt_select_ability_destination(self, table, retrieved_all_tables, special_circumstance),
+      {"reasoning": "I will choose the safest available table.", "option": fallback}
+    )
+    option = destination_dict["option"]
+    if option == table.name or option not in self.room.locations[table.name].connected:
+      return fallback
+    return option
 
   
   def act(self, table):
-    #TODO: defaulting to speak if the total score is 0
     retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = self.scratch.retrieved
     # for now the act function is reserved exclusively for those who either decided or is forced to stay at the table
     act_scores = self.scratch.current_bidding_scores
@@ -156,12 +190,14 @@ class Persona:
     poss = "her" if self.scratch.gender == "female" else "his"
     if act_scores[0][1] == 0: #case where literally nobody wanted to do anything
       self.scratch.act_reasoning = "neither me nor anyone else has made a special move, business as usual so it's a bit awkward"
+      # TODO: optionally make the agent have the option to just... not speak. idk maybe just a 50/50 dice throw???
       self.speak(table)
     else: # oh you actually want to do something
       if final_option == "ability":
         if len(table.personas.keys()) <= 1:
           # you're instead just speaking randomly because you can't really use your ability
           self.scratch.act_reasoning = "neither me nor anyone else has made a special move, business as usual so it's a bit awkward"
+          # TODO: same here, optionally make the agent have the option to just... not speak. idk maybe just a 50/50 dice throw???
           self.speak(table)
           # you have to have someone other than yourself
         else:
@@ -198,8 +234,8 @@ class Persona:
 
             if self.scratch.role == "Nun":
               self.scratch.ability_active = True
-              self.scratch.cards_slot.remove("Nun")
-              self.scratch.ability_objects.append(other_player_name)
+              self.scratch.cards_slot.discard("Nun")
+              self.scratch.ability_objects.append(target_name)
               target.scratch.cards_slot.add("Nun")
               target.scratch.nun_protected = True
               act_desp = f"{self.scratch.name} reveals as Nun and uses {obj} ability and gives {obj} card to protect {target_name}"
@@ -219,7 +255,7 @@ class Persona:
                 target.speak(table, special_circumstance)
               else:
                 if self.scratch.role == "Baron":
-                  target.scratch.cards_slot.remove(target.scratch.role)
+                  target.scratch.cards_slot.discard(target.scratch.role)
                   self.scratch.cards_slot.add(target.scratch.role)
                   act_desp = f"{self.scratch.name} reveals as Baron and robs the card of {target_name}"
                   steal_event = (self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name]))
@@ -233,13 +269,15 @@ class Persona:
                       special_circumstance = f"the Thief {self.scratch.name} is trying to use {poss} ability on you but you don't have your role card with you thus want to use this to prove you're immune,"
                       target.speak(table, special_circumstance)
                   else:
-                    self.scratch.cards_slot.remove("Thief")
+                    old_role = self.scratch.role
+                    target_old_role = target.scratch.role
+                    self.scratch.cards_slot.discard(old_role)
                     self.scratch.cards_slot.add(target.scratch.role)
-                    self.scratch.role = target.scratch.role
+                    self.scratch.role = target_old_role
                     act_desp = f"{self.scratch.name} reveals as Thief and forcefully swaps cards with {target_name}. {target_name} is the Thief now while {self.scratch.name} is now {self.scratch.role}"
-                    target.scratch.cards_slot.remove(target.scratch.role)
-                    target.scratch.cards_slot.add("Thief")
-                    target.scratch.role = "Thief"
+                    target.scratch.cards_slot.discard(target_old_role)
+                    target.scratch.cards_slot.add(old_role)
+                    target.scratch.role = old_role
                     steal_event = (self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name]))
                     table.add_table_event(steal_event)
                 # Add such that the events are registered in the above properly
@@ -248,7 +286,7 @@ class Persona:
                   self.scratch.ability_active = True
                   self.scratch.ability_objects.append(target_name)
                   special_circumstance = f"you, as Queen, have just activated your ability to force {target_name} to follow you"
-                  next_loc = run_gpt_prompt_select_ability_destination(self, table, retrieved_all_tables, special_circumstance)[0]["option"]
+                  next_loc = self.select_ability_destination(table, retrieved_all_tables, special_circumstance)
                   table.removal_targets.add((None, self.scratch.name, self.scratch.role, next_loc)) #queen herself leaving
                   special_circumstance = f"you, as Queen, have just activated your ability and are about to depart to the {next_loc} and force {target_name} to follow you, to convey this out loud,"
                   self.speak(table, special_circumstance)
@@ -256,11 +294,11 @@ class Persona:
                   special_circumstance = f"the Queen has just activated {poss} ability, chose you as the target, and are about to drag you to depart to the {next_loc}, as parting words,"
                   target.speak(table, special_circumstance)
                   event_msg = f"{self.scratch.name} leaves for {next_loc} while dragging {target_name} with {obj} using {poss} ability as Queen."
-                  table.add_table_event((self.scratch.name, target_name, event_msg, self.curr_time, set([self.scratch.name, target_name])))
+                  table.add_table_event((self.scratch.name, target_name, event_msg, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
                 elif self.scratch.role == "Spinster":
                   special_circumstance = f"you, as Spinster, have just activated your ability"
-                  next_loc = run_gpt_prompt_select_ability_destination(self, table, retrieved_all_tables, special_circumstance)[0]["option"]
+                  next_loc = self.select_ability_destination(table, retrieved_all_tables, special_circumstance)
                   special_circumstance = f"you, as Spinster, have just activated your ability and are about to depart to the {next_loc} and choose {target_name} to reveal themself, to convey this and as parting words,"
                   self.speak(table, special_circumstance)
                   table.removal_targets.add((None, self.scratch.name, self.scratch.role, next_loc)) #spinster themself leaving
@@ -283,16 +321,16 @@ class Persona:
                     table.add_table_event(reveal_event)
 
                 elif self.scratch.role == "Bishop":
-                  guess = self.guess_family_bishop(target)['guess']
+                  guess = self.guess_family_bishop(target, table)['guess']
                   special_circumstance = f"you, as Bishop, have just made an internal guess that {target_name}'s family is {guess}, which you now want to annnounce to the target and to the table"
                   self.speak(table, special_circumstance)
                   if guess != ROLE_DICT[target.scratch.role]["family"]:
                     special_circumstance = f"you have just been guessed by the Bishop {self.scratch.name} as family {guess}, which is wrong"
                     target.speak(table, special_circumstance)
                   else:
-                    next_loc = run_gpt_prompt_select_ability_destination(self, table, retrieved_all_tables, special_circumstance)[0]["option"]
+                    next_loc = self.select_ability_destination(table, retrieved_all_tables, special_circumstance)
                     special_circumstance = f"you have just been correctly guessed by the Bishop {self.scratch.name} as family {guess} and now have to leave for {next_loc}"
-                    table.removal_targets.add((self.scratch.name, target_name, self.scratch.role))
+                    table.removal_targets.add((self.scratch.name, target_name, self.scratch.role, next_loc))
                     target.speak(table, special_circumstance)
                     act_desp = f"the Bishop {self.scratch.name} correctly guesses {target_name} to reveal as family {guess} and the latter has to leave for {next_loc}"
                     reveal_event = (self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name]))
@@ -303,7 +341,7 @@ class Persona:
                   self.speak(table, special_circumstance)
                   table.removal_targets.add((None, self.scratch.name, self.scratch.role, "Village")) #innkeeper themself leaving
                   self.scratch.ability_active = True
-                  act_desp = f"{self.scratch.name} leaves for {next_loc}."
+                  act_desp = f"{self.scratch.name} leaves for Village."
                   depart_event = (self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name]))
                   table.add_table_event(depart_event)
 
@@ -319,9 +357,13 @@ class Persona:
   
   def retrieve_card(self, table, object):
     poss = "her" if self.scratch.gender == "female" else "his"
-    result = run_gpt_prompt_decide_card_retrieval(self, table, object)[0]["result"]
-    if result == "yes":
-      table.personas[object].scratch.cards_slot.remove(self.scratch.role)
+    retrieval_dict = prompt_dict(
+      run_gpt_prompt_decide_card_retrieval(self, table, object),
+      {"reasoning": "I will wait before demanding the card back.", "result": "no"}
+    )
+    result = retrieval_dict["result"]
+    if result == "yes" and object in table.personas:
+      table.personas[object].scratch.cards_slot.discard(self.scratch.role)
       self.scratch.cards_slot.add(self.scratch.role)
       if self.scratch.role == "Nun":
         table.personas[object].scratch.nun_protected = False

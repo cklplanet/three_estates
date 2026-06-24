@@ -7,7 +7,8 @@ Description: Defines the short-term memory module for generative agents.
 import datetime
 import json
 import sys
-sys.path.append('../../')
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from global_methods import *
 from persona.prompt_template.gpt_structure import *
@@ -53,7 +54,7 @@ class Scratch:
     # RELEVANT TO OUR GAME
     self.role = role #"King", "Queen", "Spinster", etc.
     self.current_bidding_scores = dict()
-    self.cards_slot = set() # has your own card by default. also "King", "Queen", "Spinster", etc.
+    self.cards_slot = {role} # has your own card by default. also "King", "Queen", "Spinster", etc.
     self.recent_conversation = [] # format: [{time(xxx): events([node, node, node])}, ....]
     #self.current_table_conversation = [] #limited to just the current table, for reflection only
     self.win_progress = None
@@ -64,7 +65,11 @@ class Scratch:
     self.act_reasoning = None
     self.relationships = dict()
     self.group_context = None
-    self.movement_cooldown = 7
+    self.movement_cooldown = 4
+    self.speaking_cooldown = 0
+    self.dialogue_cursors = dict()
+    self.overheard_dialogue_cursors = dict()
+    self.endgame_role_guesses = dict()
 
 
 
@@ -93,9 +98,11 @@ class Scratch:
         self.importance_trigger_max = scratch_load["importance_trigger_max"]
         self.importance_trigger_curr = scratch_load["importance_trigger_curr"]
 
-        #self.role = scratch_load["role"]
+        self.role = scratch_load.get("role", self.role)
         self.current_bidding_scores = scratch_load["current_bidding_scores"]
         self.cards_slot = set(scratch_load["cards_slot"])
+        if not self.cards_slot:
+          self.cards_slot = {self.role}
         self.recent_conversation = scratch_load["recent_conversation"]
         self.win_progress = scratch_load["win_progress"]
         self.ability_active = scratch_load["ability_active"]
@@ -105,6 +112,11 @@ class Scratch:
         self.act_reasoning = scratch_load["act_reasoning"]
         self.relationships = scratch_load["relationships"]
         self.group_context = scratch_load["group_context"]
+        self.movement_cooldown = scratch_load.get("movement_cooldown", self.movement_cooldown)
+        self.speaking_cooldown = scratch_load.get("speaking_cooldown", self.speaking_cooldown)
+        self.dialogue_cursors = scratch_load.get("dialogue_cursors", self.dialogue_cursors)
+        self.overheard_dialogue_cursors = scratch_load.get("overheard_dialogue_cursors", self.overheard_dialogue_cursors)
+        self.endgame_role_guesses = scratch_load.get("endgame_role_guesses", self.endgame_role_guesses)
 
 
   def save(self, out_json):
@@ -126,7 +138,7 @@ class Scratch:
     scratch["recency_decay"] = self.recency_decay
     scratch["importance_trigger_max"] = self.importance_trigger_max
     scratch["importance_trigger_curr"] = self.importance_trigger_curr
-    #scratch["role"] = self.role
+    scratch["role"] = self.role
     scratch["current_bidding_scores"] = self.current_bidding_scores
     scratch["cards_slot"] = list(self.cards_slot)
     scratch["recent_conversation"] = self.recent_conversation
@@ -138,6 +150,11 @@ class Scratch:
     scratch["act_reasoning"] = self.act_reasoning
     scratch["relationships"] = self.relationships
     scratch["group_context"] = self.group_context
+    scratch["movement_cooldown"] = self.movement_cooldown
+    scratch["speaking_cooldown"] = self.speaking_cooldown
+    scratch["dialogue_cursors"] = self.dialogue_cursors
+    scratch["overheard_dialogue_cursors"] = self.overheard_dialogue_cursors
+    scratch["endgame_role_guesses"] = self.endgame_role_guesses
 
     with open(out_json, "w") as outfile:
         json.dump(scratch, outfile, indent=2)
@@ -205,5 +222,3 @@ class Scratch:
       "14:05 P.M."
     """
     return self.act_start_time.strftime("%H:%M %p")
-
-

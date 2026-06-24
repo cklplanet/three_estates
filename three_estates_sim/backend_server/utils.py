@@ -1,23 +1,29 @@
 import datetime
+from pathlib import Path
+from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT
 
 # Copy and paste your OpenAI API Key
 OPENROUTER_KEY = "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"
 # Put your name
 key_owner = "<Name>"
 
-maze_assets_loc = "../../environment/frontend_server/static_dirs/assets"
-env_matrix = f"{maze_assets_loc}/the_ville/matrix"
-env_visuals = f"{maze_assets_loc}/the_ville/visuals"
+maze_assets_loc = FRONTEND_SERVER_ROOT / "static_dirs" / "assets"
+env_matrix = maze_assets_loc / "the_ville" / "matrix"
+env_visuals = maze_assets_loc / "the_ville" / "visuals"
 
-fs_storage = "../../environment/frontend_server/storage"
-fs_temp_storage = "../../environment/frontend_server/temp_storage"
+fs_storage = FRONTEND_SERVER_ROOT / "storage"
+fs_temp_storage = FRONTEND_SERVER_ROOT / "temp_storage"
 
-save_file = "/Users/kailechu/Desktop/work2/three_estates/three_estates_sim/sessions/kancolle1"
+save_file = DEFAULT_SESSION_DIR
 
 collision_block_id = "32125"
 
 # Verbose 
 debug = True
+
+SPEAKING_COOLDOWN_STEPS = 1
+DIALOGUE_LOG_PATH = None
+DEBUG_LOG_PATH = None
 
 
 PREFIX = """You are playing a digital version of a turn-based **social deduction game** involving secret roles, public actions, and table-based conversations.
@@ -89,3 +95,245 @@ ROLE_DICT = {
 TIMERS = {"Castle": datetime.timedelta(minutes=12),
           "Forest": datetime.timedelta(minutes=13),
           "Village": datetime.timedelta(minutes=14)}
+
+
+def prompt_payload(prompt_result, default=None):
+    if isinstance(prompt_result, (list, tuple)) and prompt_result:
+        payload = prompt_result[0]
+    else:
+        payload = prompt_result
+    if payload is False or payload is None:
+        return default
+    return payload
+
+
+def prompt_dict(prompt_result, defaults):
+    payload = prompt_payload(prompt_result, {})
+    if isinstance(payload, dict):
+        merged = dict(defaults)
+        merged.update({key: value for key, value in payload.items() if value not in [None, ""]})
+        return merged
+    return dict(defaults)
+
+
+def prompt_text(prompt_result, default):
+    payload = prompt_payload(prompt_result, default)
+    if isinstance(payload, str) and payload.strip():
+        return payload.strip()
+    return default
+
+
+def bounded_int(value, default, allowed=None, minimum=None, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if allowed is not None and parsed not in allowed:
+        return default
+    if minimum is not None and parsed < minimum:
+        return default
+    if maximum is not None and parsed > maximum:
+        return default
+    return parsed
+
+
+def set_dialogue_log_path(path):
+    global DIALOGUE_LOG_PATH
+    DIALOGUE_LOG_PATH = Path(path)
+    DIALOGUE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DIALOGUE_LOG_PATH, "a") as outfile:
+        outfile.write(f"# Three Estates table log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
+
+
+def set_debug_log_path(path):
+    global DEBUG_LOG_PATH
+    DEBUG_LOG_PATH = Path(path)
+    DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DEBUG_LOG_PATH, "a") as outfile:
+        outfile.write(f"# Three Estates debug log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
+
+
+def debug_log(message):
+    if not debug:
+        return
+    print(message)
+    if DEBUG_LOG_PATH is None:
+        return
+    with open(DEBUG_LOG_PATH, "a") as outfile:
+        outfile.write(message + "\n")
+
+
+def write_table_event_log(table_name, event_tuple):
+    if DIALOGUE_LOG_PATH is None:
+        return
+    subject, obj, description, timestamp, keywords = event_tuple
+    subject = subject or "system"
+    obj = obj or "everyone"
+    keyword_text = ", ".join(sorted(str(keyword) for keyword in keywords)) if keywords else ""
+    with open(DIALOGUE_LOG_PATH, "a") as outfile:
+        outfile.write(f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}")
+        if keyword_text:
+            outfile.write(f" | keywords={keyword_text}")
+        outfile.write("\n")
+
+
+def write_dialogue_log(table_name, dialogue_tuple):
+    if DIALOGUE_LOG_PATH is None:
+        return
+    speaker, target, volume, line, timestamp, _keywords = dialogue_tuple
+    with open(DIALOGUE_LOG_PATH, "a") as outfile:
+        outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line}\n")
+
+
+def debug_bid(persona, table, action, bid, reasoning):
+    if not debug:
+        return
+    cooldown = ""
+    if action == "speak" and persona.scratch.speaking_cooldown > 0:
+        cooldown = f" | speaking_cooldown={persona.scratch.speaking_cooldown}"
+    debug_log(
+        f"[BID] t={persona.scratch.curr_time} | table={table.name} | "
+        f"character={persona.scratch.name} | role={persona.scratch.role} | "
+        f"action={action} | bid={bid}{cooldown} | reasoning={reasoning}"
+    )
+
+
+def debug_perception(persona, table_name, self_count, other_count):
+    if not debug:
+        return
+    debug_log(
+        f"[PERCEIVE] t={persona.scratch.curr_time} | character={persona.scratch.name} | "
+        f"table={table_name} | new_local_items={self_count} | overheard_items={other_count} | "
+        f"recent_batches={len(persona.scratch.recent_conversation)}"
+    )
+
+
+def role_family(role):
+    return ROLE_DICT[role]["family"]
+
+
+def family_counts(players):
+    counts = {"Nobility": 0, "Commoners": 0, "Clergy": 0}
+    for player in players:
+        counts[role_family(player.scratch.role)] += 1
+    return counts
+
+
+def final_table_map(room):
+    return {
+        table_name: dict(table.personas)
+        for table_name, table in room.locations.items()
+    }
+
+
+def player_final_locations(final_tables):
+    locations = {}
+    for table_name, players in final_tables.items():
+        for player_name in players:
+            locations[player_name] = table_name
+    return locations
+
+
+def evaluate_base_win(player_name, player, final_tables, adjusted_results=None):
+    locations = player_final_locations(final_tables)
+    table_name = locations[player_name]
+    table_players = final_tables[table_name]
+    role = player.scratch.role
+    families_at_table = family_counts(table_players.values())
+
+    if role == "King":
+        castle_commoners = family_counts(final_tables["Castle"].values())["Commoners"]
+        return castle_commoners <= 1
+    if role == "Queen":
+        castle_players = final_tables["Castle"]
+        village_players = final_tables["Village"]
+        return (
+            table_name == "Castle" and not any(p.scratch.role == "King" for p in castle_players.values())
+        ) or (
+            table_name == "Village" and any(p.scratch.role == "Priest" for p in village_players.values())
+        )
+    if role == "Spinster":
+        guesses = getattr(player.scratch, "endgame_role_guesses", {}) or {}
+        other_players = {name: p for name, p in table_players.items() if name != player_name}
+        return all(
+            guesses.get(name) == other.scratch.role
+            for name, other in other_players.items()
+        )
+    if role == "Bishop":
+        return families_at_table["Nobility"] == 0
+    if role == "Priest":
+        return len(final_tables["Forest"]) <= 1
+    if role == "Farmer":
+        return families_at_table["Clergy"] >= 2
+    if role == "Innkeeper":
+        return families_at_table["Nobility"] >= 2
+    if role == "Baron":
+        return len(set(player.scratch.cards_slot) - {role}) >= 3
+    if role == "Nun":
+        if adjusted_results is None:
+            return False
+        return sum(
+            1 for name, result in adjusted_results.items()
+            if result and role_family(locations_to_player(final_tables)[name].scratch.role) == "Commoners"
+        ) >= 3
+    if role == "Thief":
+        if adjusted_results is None:
+            return False
+        village_others = [name for name in final_tables["Village"] if name != player_name]
+        return all(not adjusted_results.get(name, False) for name in village_others)
+    return False
+
+
+def locations_to_player(final_tables):
+    players = {}
+    for table_players in final_tables.values():
+        players.update(table_players)
+    return players
+
+
+def resolve_endgame(room):
+    final_tables = final_table_map(room)
+    players = locations_to_player(final_tables)
+    base_results = {
+        name: evaluate_base_win(name, player, final_tables)
+        for name, player in players.items()
+    }
+
+    locations = player_final_locations(final_tables)
+    flipped_by_spinster = set()
+    for spinster_name, spinster in players.items():
+        if spinster.scratch.role != "Spinster" or not base_results[spinster_name]:
+            continue
+        spinster_table = locations[spinster_name]
+        flipped_by_spinster.update(
+            name for name in final_tables[spinster_table] if name != spinster_name
+        )
+
+    adjusted_results = {
+        name: (not result if name in flipped_by_spinster else result)
+        for name, result in base_results.items()
+    }
+
+    for _ in range(max(1, len(players))):
+        changed = False
+        next_base = dict(base_results)
+        for name, player in players.items():
+            if player.scratch.role in {"Nun", "Thief"}:
+                next_base[name] = evaluate_base_win(name, player, final_tables, adjusted_results)
+        next_adjusted = {
+            name: (not result if name in flipped_by_spinster else result)
+            for name, result in next_base.items()
+        }
+        if next_base != base_results or next_adjusted != adjusted_results:
+            changed = True
+        base_results = next_base
+        adjusted_results = next_adjusted
+        if not changed:
+            break
+
+    return {
+        "tables": {table_name: list(players_at_table) for table_name, players_at_table in final_tables.items()},
+        "base_results": base_results,
+        "flipped_by_spinster": sorted(flipped_by_spinster),
+        "final_results": adjusted_results,
+    }
