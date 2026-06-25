@@ -85,7 +85,6 @@ def run_reflect(persona):
       subject_thoughts = subject_thoughts[-5:] # the recency filter
       for focal_point in focal_points:
         retrieved = new_retrieve(persona, [focal_point])
-        # TODO: note: new_retrieve retrieves thoughts possibly from older times. might want to change for further iterations
         subject_events = filter_nonoverlapping_events(retrieved, subject_nodes)
         thought_dict = prompt_dict(
           run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts, focal_point),

@@ -17,10 +17,10 @@ class Location:
         self.current_lines = [] # format: list of ((subject, object, volume, contents, timestamp, keywords))
         self.dialogue_history = [] # append-only dialogue lines for perception/logging
         self.current_events = [] # format: list of ((subject, object, act_desp, timestamp, keywords))
+        self.event_history = [] # append-only table actions for perception/logging
         self.personas = dict()
         self.removal_targets = set() # format: (sub, obj, subj_role, target_table)
         self.lockdown_targets = set() # format: (sub, obj, subj_role)
-        #TODO?: solve conflicts between for example innkeeper-lockdown and king-lockdown
         self.incoming_arrivals = set() # format: (self, "benefactor"(optional), source_table)
         self.bishop_trigger = False
         self.baron_trigger = set() # set of player_names
@@ -39,6 +39,7 @@ class Location:
     
     def add_table_event(self, event_tuple):
         self.current_events.append(event_tuple)
+        self.event_history.append(event_tuple)
         write_table_event_log(self.name, event_tuple)
         print(f"({self.name})" + event_tuple[2])
     

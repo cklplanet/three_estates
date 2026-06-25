@@ -30,7 +30,6 @@ def get_other_player_context(table, persona):
 
 
 def ability_trigger(persona, table):
-    # TODO: the peculiar case of the the thief immediately bailing after stealing one's card, encouraged but not strictly regulated
     trigger_message = ""
     if persona.scratch.role in persona.scratch.cards_slot: # Prerequisite: your card is still with you
         if len(table.personas.keys()) == 2: # those that require one-on-one triggers

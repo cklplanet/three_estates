@@ -195,7 +195,7 @@ def run_gpt_prompt_thought_poignancy(persona, thought_description, test_input=No
 def run_gpt_prompt_act_bidding_ability(persona, table, test_input=None, verbose=False): 
   data = get_bidding_common_data(persona, table)
 
-  prompt_template = "persona/prompt_template/templates/reaction_bidding_speaking.txt"
+  prompt_template = "persona/prompt_template/templates/reaction_bidding_ability.txt"
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
