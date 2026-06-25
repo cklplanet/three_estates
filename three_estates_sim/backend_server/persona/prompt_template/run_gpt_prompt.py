@@ -58,7 +58,7 @@ def run_gpt_prompt_generate_character(character_group_context, existing_characte
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   #print(output) #debug
   
   if output != False: 
@@ -78,7 +78,7 @@ def run_gpt_prompt_generate_relationship(character_group_context, persona1, pers
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup)
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   if output != False: 
     return output, [output, prompt, data]
   

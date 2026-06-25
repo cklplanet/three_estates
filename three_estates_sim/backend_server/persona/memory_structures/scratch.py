@@ -143,12 +143,12 @@ class Scratch:
     scratch["role"] = self.role
     scratch["current_bidding_scores"] = self.current_bidding_scores
     scratch["cards_slot"] = list(self.cards_slot)
-    scratch["recent_conversation"] = self.recent_conversation
+    scratch["recent_conversation"] = []
     scratch["win_progress"] = self.win_progress
     scratch["ability_active"] = self.ability_active
     scratch["nun_protected"] = self.nun_protected
     scratch["ability_objects"] = self.ability_objects
-    scratch["retrieved"] = self.retrieved
+    scratch["retrieved"] = None
     scratch["act_reasoning"] = self.act_reasoning
     scratch["relationships"] = self.relationships
     scratch["group_context"] = self.group_context

@@ -23,7 +23,8 @@ class ConceptNode:
                node_id, node_count, type_count, node_type,
                created,
                s, o, table,
-               description, embedding_key, poignancy, keywords): 
+               description, embedding_key, poignancy, keywords,
+               expiration=None, depth=0, predicate=None, filling=None):
     self.node_id = node_id
     self.node_count = node_count
     self.type_count = type_count
@@ -31,8 +32,11 @@ class ConceptNode:
 
     self.created = created
     self.last_accessed = self.created
+    self.expiration = expiration
+    self.depth = depth
 
     self.subject = s
+    self.predicate = predicate
     self.object = o
     self.table = table
 
@@ -40,6 +44,7 @@ class ConceptNode:
     self.embedding_key = embedding_key
     self.poignancy = poignancy
     self.keywords = keywords
+    self.filling = filling
 
 
   def spo_summary(self): 
@@ -75,15 +80,13 @@ class AssociativeMemory:
         node_count = node_details["node_count"]
         type_count = node_details["type_count"]
         node_type = node_details["type"]
-        node_table = node_details["table"]
-        depth = node_details["depth"]
+        node_table = node_details.get("table")
+        depth = node_details.get("depth", 0)
 
-        created = datetime.datetime.strptime(node_details["created"], 
-                                            '%Y-%m-%d %H:%M:%S')
+        created = self.load_elapsed_time(node_details.get("created"))
         expiration = None
-        if node_details["expiration"]: 
-          expiration = datetime.datetime.strptime(node_details["expiration"],
-                                                  '%Y-%m-%d %H:%M:%S')
+        if node_details.get("expiration") is not None:
+          expiration = self.load_elapsed_time(node_details["expiration"])
 
         s = node_details["subject"]
         o = node_details["object"]
@@ -103,7 +106,7 @@ class AssociativeMemory:
                      description, keywords, poignancy, 
                      embedding_pair)
         elif node_type == "thought": 
-          self.add_thought(self, created, expiration, s, o, 
+          self.add_thought(created, expiration, s, o,
                         description, keywords, poignancy, 
                         embedding_pair)
 
@@ -114,6 +117,34 @@ class AssociativeMemory:
         self.kw_strength_thought = kw_strength_load["kw_strength_thought"]
 
     
+  def elapsed_time_to_json(self, value):
+    if value is None:
+      return None
+    if isinstance(value, datetime.timedelta):
+      return value.total_seconds()
+    if isinstance(value, datetime.datetime):
+      return value.strftime('%Y-%m-%d %H:%M:%S')
+    return value
+
+
+  def load_elapsed_time(self, value):
+    if value is None:
+      return datetime.timedelta(0)
+    if isinstance(value, (int, float)):
+      return datetime.timedelta(seconds=value)
+    try:
+      return datetime.timedelta(seconds=float(value))
+    except (TypeError, ValueError):
+      pass
+    return datetime.timedelta(0)
+
+
+  def embedding_to_json(self, value):
+    if hasattr(value, "tolist"):
+      return value.tolist()
+    return value
+
+
   def save(self, out_json): 
     r = dict()
     for count in range(len(self.id_to_node.keys()), 0, -1): 
@@ -125,12 +156,10 @@ class AssociativeMemory:
       r[node_id]["type_count"] = node.type_count
       r[node_id]["type"] = node.type
       r[node_id]["depth"] = node.depth
+      r[node_id]["table"] = node.table
 
-      r[node_id]["created"] = node.created.strftime('%Y-%m-%d %H:%M:%S')
-      r[node_id]["expiration"] = None
-      if node.expiration: 
-        r[node_id]["expiration"] = (node.expiration
-                                        .strftime('%Y-%m-%d %H:%M:%S'))
+      r[node_id]["created"] = self.elapsed_time_to_json(node.created)
+      r[node_id]["expiration"] = self.elapsed_time_to_json(node.expiration)
 
       r[node_id]["subject"] = node.subject
       r[node_id]["predicate"] = node.predicate
@@ -152,7 +181,7 @@ class AssociativeMemory:
       json.dump(r, outfile)
 
     with open(out_json+"/embeddings.json", "w") as outfile:
-      json.dump(self.embeddings, outfile)
+      json.dump({key: self.embedding_to_json(value) for key, value in self.embeddings.items()}, outfile)
 
 
   def add_event(self, created, s, o, table,
@@ -216,10 +245,11 @@ class AssociativeMemory:
     depth = 1 
 
     # Creating the <ConceptNode> object.
-    node = ConceptNode(node_id, node_count, type_count, node_type, depth,
-                       created, expiration, 
+    node = ConceptNode(node_id, node_count, type_count, node_type,
+                       created,
                        s, o, None,
-                       description, embedding_pair[0], poignancy, keywords)
+                       description, embedding_pair[0], poignancy, keywords,
+                       expiration=expiration, depth=depth)
 
     # Creating various dictionary cache for fast access. 
     self.seq_thought[0:0] = [node]

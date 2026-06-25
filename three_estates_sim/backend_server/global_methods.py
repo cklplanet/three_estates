@@ -81,5 +81,5 @@ def check_if_file_exists(curr_file):
     with open(curr_file) as f_analysis_file: pass
     print("yes the file exists")
     return True
-  except: 
+  except OSError:
     return False

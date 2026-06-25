@@ -51,16 +51,24 @@ def generate_prompt(curr_input, prompt_lib_file):
   return prompt.strip()
 
 
-def ChatGPT_request(prompt):
+def ChatGPT_request(prompt, model=None):
+    selected_model = model or GAME_LOOP_LLM_MODEL
     try:
         completion = client.chat.completions.create(
-            #model="deepseek/deepseek-chat-v3-0324",
-            model="openai/gpt-5.5",
-            #model="openai/gpt-4.1",
+            model=selected_model,
             messages=[{"role": "user", "content": prompt}]
         )
-        print(completion.choices[0].message.content)
-        return completion.choices[0].message.content
+        if not completion or not completion.choices:
+            print(f"ChatGPT malformed response from model={selected_model}:")
+            print(completion.model_dump() if hasattr(completion, "model_dump") else completion)
+            return "ChatGPT ERROR"
+        content = completion.choices[0].message.content
+        if not content:
+            print(f"ChatGPT empty response from model={selected_model}:")
+            print(completion.model_dump() if hasattr(completion, "model_dump") else completion)
+            return "ChatGPT ERROR"
+        print(content)
+        return content
     except Exception:
         # print the actual exception
         import traceback
@@ -71,6 +79,7 @@ def ChatGPT_request(prompt):
 
 def ChatGPT_safe_generate_response(prompt, 
                                    fail_safe_response="error",
+                                   model=None,
                                    verbose=False): 
   # prompt = 'GPT-3 Prompt:\n"""\n' + prompt + '\n"""\n'
   prompt = '"""\n' + prompt + '\n"""\n'
@@ -81,7 +90,7 @@ def ChatGPT_safe_generate_response(prompt,
     print (prompt)
 
 
-  curr_gpt_response = ChatGPT_request(prompt).strip()
+  curr_gpt_response = ChatGPT_request(prompt, model=model).strip()
   #end_index = curr_gpt_response.rfind('}') + 1
   #curr_gpt_response = curr_gpt_response[:end_index]
   
@@ -95,6 +104,7 @@ def ChatGPT_safe_generate_response(prompt,
 def ChatGPT_safe_generate_response_full(prompt, 
                                    repeat=3,
                                    func_clean_up=None,
+                                   model=None,
                                    verbose=False): 
   # prompt = 'GPT-3 Prompt:\n"""\n' + prompt + '\n"""\n'
   prompt = '"""\n' + prompt + '\n"""\n'
@@ -107,7 +117,7 @@ def ChatGPT_safe_generate_response_full(prompt,
   for i in range(repeat): 
 
     try: 
-      curr_gpt_response = ChatGPT_request(prompt).strip()
+      curr_gpt_response = ChatGPT_request(prompt, model=model).strip()
       #end_index = curr_gpt_response.rfind('}') + 1
       #curr_gpt_response = curr_gpt_response[:end_index]
       #curr_gpt_response = json.loads(curr_gpt_response)["output"]
@@ -123,7 +133,9 @@ def ChatGPT_safe_generate_response_full(prompt,
         print (curr_gpt_response)
         print ("~~~~")
 
-    except: 
+    except (KeyboardInterrupt, SystemExit):
+      raise
+    except Exception:
       pass
 
   return False

@@ -1,2 +1,5 @@
 three_estates_sim/sessions/
 three_estates
+.env
+.env.*
+!.env.example
