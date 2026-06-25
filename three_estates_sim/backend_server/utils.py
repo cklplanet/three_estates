@@ -45,6 +45,10 @@ DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
 
 
+class FatalLLMError(RuntimeError):
+    """Raised when an LLM call or required LLM output parse fails."""
+
+
 PREFIX = """You are playing a digital version of a turn-based **social deduction game** involving secret roles, public actions, and table-based conversations.
 
 GAME RULES:
@@ -111,9 +115,9 @@ ROLE_DICT = {
     }
 }
 
-TIMERS = {"Castle": datetime.timedelta(minutes=12),
-          "Forest": datetime.timedelta(minutes=13),
-          "Village": datetime.timedelta(minutes=14)}
+TIMERS = {"Castle": datetime.timedelta(minutes=6),
+          "Forest": datetime.timedelta(minutes=7),
+          "Village": datetime.timedelta(minutes=8)}
 
 
 def prompt_payload(prompt_result, default=None):
@@ -199,9 +203,14 @@ def write_table_event_log(table_name, event_tuple):
 def write_dialogue_log(table_name, dialogue_tuple):
     if DIALOGUE_LOG_PATH is None:
         return
-    speaker, target, volume, line, timestamp, _keywords = dialogue_tuple
+    if len(dialogue_tuple) == 6:
+        speaker, target, volume, line, timestamp, _keywords = dialogue_tuple
+        audience = []
+    else:
+        speaker, target, volume, line, timestamp, audience, _keywords = dialogue_tuple
+    audience_text = ", ".join(sorted(str(player) for player in audience)) if audience else "unknown"
     with open(DIALOGUE_LOG_PATH, "a") as outfile:
-        outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line}\n")
+        outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}] audience=[{audience_text}]: {line}\n")
 
 
 def debug_bid(persona, table, action, bid, reasoning):
@@ -214,6 +223,20 @@ def debug_bid(persona, table, action, bid, reasoning):
         f"[BID] t={persona.scratch.curr_time} | table={table.name} | "
         f"character={persona.scratch.name} | role={persona.scratch.role} | "
         f"action={action} | bid={bid}{cooldown} | reasoning={reasoning}"
+    )
+
+
+def debug_movement(persona, table, requested_option, final_option, reasoning):
+    if not debug:
+        return
+    adjusted = ""
+    if requested_option != final_option:
+        adjusted = f" | adjusted_from={requested_option}"
+    debug_log(
+        f"[MOVE-DECISION] t={persona.scratch.curr_time} | table={table.name} | "
+        f"character={persona.scratch.name} | role={persona.scratch.role} | "
+        f"option={final_option}{adjusted} | movement_cooldown={persona.scratch.movement_cooldown} | "
+        f"reasoning={reasoning}"
     )
 
 

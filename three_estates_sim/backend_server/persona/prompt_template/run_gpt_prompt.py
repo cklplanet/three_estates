@@ -397,10 +397,6 @@ def run_gpt_prompt_select_ability_target(persona, table, test_input=None, verbos
     ability_target_info += "as King, you can select one of the families present at the table as target:\n"
     family_options = ", ".join(list(family_options))
     ability_target_info += family_options
-  elif persona.scratch.role == "Baron":
-    ability_target_info += f"as Baron, you can select one of the players present at the table as target:\n"
-    target_options = ", ".join(list(table.baron_trigger))
-    ability_target_info += target_options
   elif persona.scratch.role == "Spinster" or persona.scratch.role == "Queen" or persona.scratch.role == "Bishop":
     ability_target_info += f"as {persona.scratch.role}, you can select one of the players present at the table as target:\n"
     target_options = ", ".join(list(set(table.personas.keys()) - {persona.scratch.name}))
@@ -446,6 +442,31 @@ def run_gpt_prompt_guess_family_bishop(persona, target, table, test_input=None, 
   if output != False:
     if "guess" not in output and "target" in output:
       output["guess"] = output["target"]
+    return output, [output, prompt, data_sub]
+
+
+def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_context, test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table)
+  data_sub = {
+    "PREFIX": PREFIX,
+    "personal_context_msg": data["personal_context_msg"],
+    "current_table_context": data["current_table_context"],
+    "recent_conversation": data["recent_conversation"],
+    "current_table_events": data["current_table_events"],
+    "current_table_additional_context": data["current_table_additional_context"],
+    "other_table_additional_context": data["other_table_additional_context"],
+    "stay_at_table_reason": data["stay_at_table_reason"],
+    "total_time_left": data["total_time_left"],
+    "revealed_player_name": revealed_player.scratch.name,
+    "revealed_player_role": revealed_player.scratch.role,
+    "action_context": action_context,
+  }
+  prompt_template = "persona/prompt_template/templates/decide_baron_block.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data_sub)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  if output != False:
     return output, [output, prompt, data_sub]
 
 

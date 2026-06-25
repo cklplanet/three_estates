@@ -13,6 +13,16 @@ from global_methods import *
 from persona.prompt_template.gpt_structure import *
 from persona.prompt_template.run_gpt_prompt import *
 
+def unpack_dialogue(utterance):
+  if len(utterance) == 6:
+    s_chat, o_chat, volume, line, timestamp_chat, keywords_chat = utterance
+    audience = set()
+  else:
+    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = utterance
+    audience = set(audience)
+  return s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat
+
+
 def generate_poig_score(persona, event_type, description): 
   
   if event_type == "event" or event_type == "thought": 
@@ -74,10 +84,13 @@ def perceive(persona, room):
   persona.scratch.dialogue_cursors[persona.scratch.curr_loc] = len(current_table.dialogue_history)
 
   for utterance in local_dialogue:
-    s_chat, o_chat, volume, line, timestamp_chat, keywords_chat = utterance
+    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
+    if audience and persona.scratch.name not in audience:
+      continue
     if not o_chat:
       o_chat = f"all of {persona.scratch.curr_loc}"
-    line = f"{s_chat}, to {o_chat}: ({volume}) {line}"
+    audience_text = ", ".join(sorted(audience)) if audience else "unknown"
+    line = f"{s_chat}, to {o_chat}: ({volume}) {line} [People physically present for this line: {audience_text}]"
     chat_poignancy = generate_poig_score(persona, "chat", line)
     line_embedding_in = line
     if line_embedding_in in persona.a_mem.embeddings: 
@@ -99,9 +112,10 @@ def perceive(persona, room):
     overheard_dialogue = other_location.dialogue_history[overheard_cursor:]
     persona.scratch.overheard_dialogue_cursors[other_table] = len(other_location.dialogue_history)
     for utterance in overheard_dialogue:
-      s_chat, o_chat, volume, line, timestamp_chat, keywords_chat = utterance
+      s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
       if volume == "practically screaming":
-        line = f"{s_chat}: ({volume}) {line}"
+        audience_text = ", ".join(sorted(audience)) if audience else "unknown"
+        line = f"{s_chat}: ({volume}, overheard from the {other_table}; people physically present there: {audience_text}) {line}"
         chat_poignancy = generate_poig_score(persona, "chat", line)
         line_embedding_in = line
         if line_embedding_in in persona.a_mem.embeddings: 

@@ -61,20 +61,24 @@ def ChatGPT_request(prompt, model=None):
         if not completion or not completion.choices:
             print(f"ChatGPT malformed response from model={selected_model}:")
             print(completion.model_dump() if hasattr(completion, "model_dump") else completion)
-            return "ChatGPT ERROR"
+            raise FatalLLMError(f"Malformed LLM response from model={selected_model}")
         content = completion.choices[0].message.content
         if not content:
             print(f"ChatGPT empty response from model={selected_model}:")
             print(completion.model_dump() if hasattr(completion, "model_dump") else completion)
-            return "ChatGPT ERROR"
+            raise FatalLLMError(f"Empty LLM response from model={selected_model}")
         print(content)
         return content
+    except FatalLLMError:
+        raise
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception:
         # print the actual exception
         import traceback
         traceback.print_exc()
         print("ChatGPT ERROR")
-        return "ChatGPT ERROR"
+        raise FatalLLMError(f"LLM request failed for model={selected_model}")
   
 
 def ChatGPT_safe_generate_response(prompt, 
@@ -133,9 +137,10 @@ def ChatGPT_safe_generate_response_full(prompt,
         print (curr_gpt_response)
         print ("~~~~")
 
-    except (KeyboardInterrupt, SystemExit):
+    except (KeyboardInterrupt, SystemExit, FatalLLMError):
       raise
-    except Exception:
-      pass
+    except Exception as exc:
+      if i == repeat - 1:
+        raise FatalLLMError(f"LLM response cleanup failed after {repeat} attempts: {exc}") from exc
 
-  return False
+  raise FatalLLMError(f"LLM response cleanup failed after {repeat} attempts")

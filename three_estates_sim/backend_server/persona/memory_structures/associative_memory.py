@@ -67,9 +67,16 @@ class AssociativeMemory:
     self.kw_strength_event = dict()
     self.kw_strength_thought = dict()
 
-    f_saved = f_saved + f"/{name}"
+    direct_saved = f_saved
+    nested_saved = f"{f_saved}/{name}" if f_saved else False
+    if direct_saved and os.path.isfile(f"{direct_saved}/nodes.json"):
+      f_saved = direct_saved
+    elif nested_saved and os.path.isfile(f"{nested_saved}/nodes.json"):
+      f_saved = nested_saved
+    else:
+      f_saved = False
 
-    if os.path.isdir(f_saved):
+    if f_saved and os.path.isdir(f_saved):
       self.embeddings = json.load(open(f_saved + "/embeddings.json"))
 
       nodes_load = json.load(open(f_saved + "/nodes.json"))

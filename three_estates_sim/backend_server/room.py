@@ -14,7 +14,7 @@ class Location:
         self.connected = set()     # NAMES of adjacent locations
         self.revealed_cards = []
         self.events = set()        # events (and events corresponding to objects) happening at this location? maybe?
-        self.current_lines = [] # format: list of ((subject, object, volume, contents, timestamp, keywords))
+        self.current_lines = [] # format: list of ((subject, object, volume, contents, timestamp, audience, keywords))
         self.dialogue_history = [] # append-only dialogue lines for perception/logging
         self.current_events = [] # format: list of ((subject, object, act_desp, timestamp, keywords))
         self.event_history = [] # append-only table actions for perception/logging
@@ -23,7 +23,6 @@ class Location:
         self.lockdown_targets = set() # format: (sub, obj, subj_role)
         self.incoming_arrivals = set() # format: (self, "benefactor"(optional), source_table)
         self.bishop_trigger = False
-        self.baron_trigger = set() # set of player_names
         self.spinster_marked = None
         self.timer_expired = False
 
@@ -44,6 +43,11 @@ class Location:
         print(f"({self.name})" + event_tuple[2])
     
     def add_table_dialogue(self, dialogue_tuple):
+        if len(dialogue_tuple) == 6:
+            speaker, target, volume, line, timestamp, keywords = dialogue_tuple
+            audience = set(self.personas.keys())
+            keywords = set(keywords) | audience
+            dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
         self.current_lines.append(dialogue_tuple)
         self.dialogue_history.append(dialogue_tuple)
         write_dialogue_log(self.name, dialogue_tuple)

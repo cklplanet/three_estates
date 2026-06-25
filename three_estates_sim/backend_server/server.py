@@ -21,6 +21,8 @@ RUN_LOG_TIME_FORMAT = "%Y%m%d_%H%M%S"
 NON_PERSONA_SESSION_DIRS = {"dialogue_logs"}
 NEW_SESSION_ALIASES = {"new", "n", "start new", "restart", "fresh"}
 CONTINUE_SESSION_ALIASES = {"continue", "c", "resume", "r", "load"}
+REUSE_CAST_SAME_ROLES_ALIASES = {"same roles", "same", "reuse roles", "reuse same", "cast roles", "2"}
+REUSE_CAST_REROLL_ROLES_ALIASES = {"reroll roles", "reroll", "reassign roles", "reuse reroll", "cast reroll", "3"}
 
 
 class ThreeEstatesServer:
@@ -105,7 +107,11 @@ class ThreeEstatesServer:
         while True:
             choice = input(
                 f"Existing session data found in {save_file} ({checkpoint_note}). "
-                "Type 'continue' to load it or 'new' to archive it and start fresh:\n"
+                "Choose one:\n"
+                "- 'continue' to load the saved run\n"
+                "- 'new' to archive everything and generate a fully new cast\n"
+                "- 'same roles' to reuse these characters and roles, but wipe game state/memory/logs\n"
+                "- 'reroll roles' to reuse these characters with reassigned roles, wiping game state/memory/logs\n"
             ).strip().lower()
             if choice in CONTINUE_SESSION_ALIASES:
                 return "resume" if has_checkpoint else "legacy"
@@ -113,7 +119,11 @@ class ThreeEstatesServer:
                 self.archive_existing_session()
                 os.makedirs(save_file, exist_ok=True)
                 return "new"
-            print("Please type 'continue' or 'new'.")
+            if choice in REUSE_CAST_SAME_ROLES_ALIASES:
+                return "reuse_same_roles"
+            if choice in REUSE_CAST_REROLL_ROLES_ALIASES:
+                return "reuse_reroll_roles"
+            print("Please type 'continue', 'new', 'same roles', or 'reroll roles'.")
 
     def metadata_payload(self):
         return {
@@ -150,11 +160,14 @@ class ThreeEstatesServer:
         return metadata
 
     def serialize_record(self, record):
-        values = list(record)
-        if len(values) >= 2 and isinstance(values[-2], datetime.timedelta):
-            values[-2] = values[-2].total_seconds()
-        if values and isinstance(values[-1], set):
-            values[-1] = sorted(values[-1])
+        values = []
+        for value in record:
+            if isinstance(value, datetime.timedelta):
+                values.append(value.total_seconds())
+            elif isinstance(value, set):
+                values.append(sorted(value))
+            else:
+                values.append(value)
         return values
 
     def deserialize_event_record(self, record):
@@ -162,8 +175,12 @@ class ThreeEstatesServer:
         return (subject, obj, description, datetime.timedelta(seconds=timestamp), set(keywords))
 
     def deserialize_dialogue_record(self, record):
-        speaker, target, volume, line, timestamp, keywords = record
-        return (speaker, target, volume, line, datetime.timedelta(seconds=timestamp), set(keywords))
+        if len(record) == 6:
+            speaker, target, volume, line, timestamp, keywords = record
+            audience = []
+        else:
+            speaker, target, volume, line, timestamp, audience, keywords = record
+        return (speaker, target, volume, line, datetime.timedelta(seconds=timestamp), set(audience), set(keywords))
 
     def serialize_table(self, table):
         return {
@@ -176,7 +193,6 @@ class ThreeEstatesServer:
             "lockdown_targets": [list(target) for target in table.lockdown_targets],
             "incoming_arrivals": [list(arrival) for arrival in table.incoming_arrivals],
             "bishop_trigger": table.bishop_trigger,
-            "baron_trigger": sorted(table.baron_trigger),
             "spinster_marked": list(table.spinster_marked) if table.spinster_marked else None,
             "timer_expired": table.timer_expired,
         }
@@ -196,7 +212,6 @@ class ThreeEstatesServer:
         table.lockdown_targets = {tuple(target) for target in table_state.get("lockdown_targets", [])}
         table.incoming_arrivals = {tuple(arrival) for arrival in table_state.get("incoming_arrivals", [])}
         table.bishop_trigger = table_state.get("bishop_trigger", False)
-        table.baron_trigger = set(table_state.get("baron_trigger", []))
         spinster_marked = table_state.get("spinster_marked")
         table.spinster_marked = tuple(spinster_marked) if spinster_marked else None
         table.timer_expired = table_state.get("timer_expired", False)
@@ -261,7 +276,8 @@ class ThreeEstatesServer:
         target = table.personas[target_name]
         if target.scratch.role == "Farmer":
             special_circumstance = f"the {role} {benefactor} is trying to lock you at this table and you have to reveal you're the Farmer and immune"
-            act_desp = f"{target_name} reveals as Farmer"
+            poss = "her" if target.scratch.gender == "female" else "his"
+            act_desp = f"{target_name} reveals {poss} Farmer card"
             reveal_event = (target_name, None, act_desp, self.curr_time, set([target_name]))
             table.add_table_event(reveal_event)
             target.speak(table, special_circumstance)
@@ -334,6 +350,88 @@ class ThreeEstatesServer:
 
         return ""
 
+    def load_character_context_payload(self):
+        context_path = self.session_context_path()
+        if os.path.isfile(context_path):
+            with open(context_path) as infile:
+                return json.load(infile)
+        return {}
+
+    def collect_cast_from_existing_session(self):
+        cast = []
+        for filename in os.listdir(save_file):
+            if not self.is_persona_dir(filename):
+                continue
+            scratch_path = os.path.join(save_file, filename, "scratch.json")
+            if not os.path.isfile(scratch_path):
+                continue
+            with open(scratch_path) as infile:
+                scratch = json.load(infile)
+            cast.append({
+                "name": scratch.get("name") or filename,
+                "first_name": scratch.get("first_name"),
+                "last_name": scratch.get("last_name"),
+                "gender": scratch.get("gender"),
+                "age": scratch.get("age"),
+                "innate": scratch.get("innate"),
+                "role": scratch.get("role"),
+                "group_context": scratch.get("group_context"),
+            })
+        return cast
+
+    def rebuild_clean_cast(self, cast, roles, reroll_roles=False):
+        if len(cast) > len(roles):
+            raise ValueError(f"More saved characters than available roles in {save_file}")
+        if reroll_roles:
+            previous_roles = {character["name"]: character.get("role") for character in cast}
+            role_assignments = None
+            for _attempt in range(100):
+                role_pool = random.sample(list(roles), len(cast))
+                candidate = {
+                    character["name"]: role
+                    for character, role in zip(cast, role_pool)
+                }
+                if all(candidate[name] != previous_roles.get(name) for name in candidate):
+                    role_assignments = candidate
+                    break
+            if role_assignments is None:
+                role_pool = random.sample(list(roles), len(cast))
+                role_assignments = {
+                    character["name"]: role
+                    for character, role in zip(cast, role_pool)
+                }
+        else:
+            used_roles = set()
+            role_assignments = {}
+            fallback_roles = list(roles)
+            random.shuffle(fallback_roles)
+            for character in cast:
+                role = character.get("role")
+                if role not in roles or role in used_roles:
+                    while fallback_roles and fallback_roles[-1] in used_roles:
+                        fallback_roles.pop()
+                    if not fallback_roles:
+                        raise ValueError(f"Could not assign a unique role to {character['name']}")
+                    role = fallback_roles.pop()
+                used_roles.add(role)
+                role_assignments[character["name"]] = role
+
+        self.personas = {}
+        self.room = RoomGraph(self.personas)
+        self.personas_loc = {}
+        for character in cast:
+            role = role_assignments[character["name"]]
+            persona = Persona(character["name"], self.room, role)
+            persona.scratch.name = character["name"]
+            persona.scratch.first_name = character.get("first_name")
+            persona.scratch.last_name = character.get("last_name")
+            persona.scratch.gender = character.get("gender")
+            persona.scratch.age = character.get("age")
+            persona.scratch.innate = character.get("innate")
+            persona.scratch.group_context = character.get("group_context")
+            self.personas[persona.scratch.name] = persona
+            persona.save(os.path.join(save_file, persona.scratch.name))
+
     def load_personas_from_session(self, roles):
         random_pool = list(roles)
         random.shuffle(random_pool)
@@ -378,6 +476,7 @@ class ThreeEstatesServer:
             session_mode = self.choose_session_mode()
             resume_from_checkpoint = session_mode == "resume"
             generated_new_characters = session_mode == "new"
+            reused_existing_characters = session_mode in {"reuse_same_roles", "reuse_reroll_roles"}
             if session_mode in {"resume", "legacy"}:
                 print("save file detected, loading")
                 self.load_session_metadata()
@@ -390,6 +489,22 @@ class ThreeEstatesServer:
                 if resume_from_checkpoint:
                     self.load_checkpoint()
                 self.initialize_dialogue_log(resume_existing=resume_from_checkpoint)
+            elif reused_existing_characters:
+                context_payload = self.load_character_context_payload()
+                character_group_context = context_payload.get("character_group_context", "")
+                name_mode = context_payload.get("name_mode", "")
+                cast = self.collect_cast_from_existing_session()
+                if not cast:
+                    raise ValueError(f"No saved characters found in {save_file}")
+                self.archive_existing_session()
+                os.makedirs(save_file, exist_ok=True)
+                self.session_id = uuid.uuid4().hex[:12]
+                self.dialogue_log_path = None
+                self.debug_log_path = None
+                self.save_character_context(character_group_context, name_mode)
+                self.rebuild_clean_cast(cast, roles, reroll_roles=(session_mode == "reuse_reroll_roles"))
+                self.initialize_dialogue_log()
+                self.save_personas_only("clean_character_reuse_complete")
             else:
                 self.session_id = uuid.uuid4().hex[:12]
                 character_group_context = input("Enter the context in which you generate characters:\n")
@@ -417,6 +532,15 @@ class ThreeEstatesServer:
                     if relationship_flag == "yes":
                         all_pairs = list(itertools.combinations(self.personas.values(), 2))
                         num_relationships = random.randint(3, 6)
+                        selected_pairs = random.sample(all_pairs, num_relationships)
+                        for p1, p2 in selected_pairs:
+                            self.generate_relationship(character_group_context, p1, p2)
+                    self.save_personas_only("relationship_generation_complete")
+                elif reused_existing_characters:
+                    relationship_flag = input("Do you want at least some of them to know each other beforehand? yes or no\n")
+                    if relationship_flag == "yes":
+                        all_pairs = list(itertools.combinations(self.personas.values(), 2))
+                        num_relationships = min(random.randint(3, 6), len(all_pairs))
                         selected_pairs = random.sample(all_pairs, num_relationships)
                         for p1, p2 in selected_pairs:
                             self.generate_relationship(character_group_context, p1, p2)
@@ -518,17 +642,15 @@ class ThreeEstatesServer:
                                     persona.update_knowledge(self.room)
                                     persona.retrieve_card(table, persona.scratch.ability_objects[0])
 
-                    table.baron_trigger = set()
                     table.bishop_trigger = False
 
                     if table.spinster_marked:
                         spinster_marked_name, spinster_name = table.spinster_marked
                         spinster_marked = table.personas[spinster_marked_name]
-                        act_desp = f"the Spinster {spinster_name} forces {spinster_marked_name} to reveal as {spinster_marked.scratch.role} before departing"
+                        act_desp = f"the Spinster {spinster_name} forces {spinster_marked_name} to reveal {spinster_marked.possessive_for()} {spinster_marked.scratch.role} card before departing"
                         reveal_event = (spinster_name, spinster_marked_name, act_desp, self.curr_time, set([spinster_marked_name, spinster_name]))
                         table.add_table_event(reveal_event)
-                        if spinster_marked.scratch.role in spinster_marked.scratch.cards_slot:
-                            table.baron_trigger.add(spinster_marked_name)
+                        spinster_marked.resolve_baron_reaction(table, spinster_marked_name, act_desp, block_ability=False)
                         table.spinster_marked = None
 
                     for removal_target in table.removal_targets:
@@ -606,6 +728,14 @@ class ThreeEstatesServer:
             else:
                 print("No stable checkpoint exists yet, so there is no game state to resume from.")
             return
+        except FatalLLMError as exc:
+            print(f"\nFatal LLM error: {exc}")
+            print("Stopping simulation immediately without saving a mid-timestep state.")
+            if os.path.isfile(self.session_state_path()):
+                print(f"Resume will use the latest stable checkpoint: {self.session_state_path()}")
+            else:
+                print("No stable checkpoint exists yet, so there is no game state to resume from.")
+            raise SystemExit(1)
 
 
 if __name__ == '__main__':
