@@ -65,10 +65,11 @@ class Scratch:
     self.act_reasoning = None
     self.relationships = dict()
     self.group_context = None
-    self.movement_cooldown = 4
+    self.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
     self.speaking_cooldown = 0
     self.dialogue_cursors = dict()
     self.overheard_dialogue_cursors = dict()
+    self.event_cursors = dict()
     self.endgame_role_guesses = dict()
 
 
@@ -116,6 +117,7 @@ class Scratch:
         self.speaking_cooldown = scratch_load.get("speaking_cooldown", self.speaking_cooldown)
         self.dialogue_cursors = scratch_load.get("dialogue_cursors", self.dialogue_cursors)
         self.overheard_dialogue_cursors = scratch_load.get("overheard_dialogue_cursors", self.overheard_dialogue_cursors)
+        self.event_cursors = scratch_load.get("event_cursors", self.event_cursors)
         self.endgame_role_guesses = scratch_load.get("endgame_role_guesses", self.endgame_role_guesses)
 
 
@@ -154,6 +156,7 @@ class Scratch:
     scratch["speaking_cooldown"] = self.speaking_cooldown
     scratch["dialogue_cursors"] = self.dialogue_cursors
     scratch["overheard_dialogue_cursors"] = self.overheard_dialogue_cursors
+    scratch["event_cursors"] = self.event_cursors
     scratch["endgame_role_guesses"] = self.endgame_role_guesses
 
     with open(out_json, "w") as outfile:

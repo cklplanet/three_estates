@@ -19,7 +19,7 @@ from utils import *
 
 ABILITY_MULTIPLIER = 1
 REVEAL_MULTIPLIER = 1
-SPEAK_MULTIPLIER = 2
+SPEAK_MULTIPLIER = 1.5
 
 
 def bid(persona, table):
@@ -29,7 +29,6 @@ def bid(persona, table):
   # Default ability bid is 0 (not usable)
   ability_bid = 0
   # Check conditions for ability being allowed
-  # TODO: prompt in other forms of act notifying that they can't use their ability right now.
   if table_size > 1 and role in persona.scratch.cards_slot: # if there isn't any other person at the table don't even bother bidding for the ability
     if (
         (role == "Bishop" and table.bishop_trigger) or

@@ -14,12 +14,10 @@ from paths import FRONTEND_SERVER_ROOT
 folder_mem_saved = FRONTEND_SERVER_ROOT / "memory"
 SESSION_CONTEXT_FILE = "character_context.json"
 RUN_LOG_TIME_FORMAT = "%Y%m%d_%H%M%S"
+NON_PERSONA_SESSION_DIRS = {"dialogue_logs"}
 
 
 class ThreeEstatesServer:
-
-    # TODO: actually checking game end win
-
     def __init__(self):
         self.personas = dict()
         self.room = RoomGraph(self.personas)
@@ -46,6 +44,11 @@ class ThreeEstatesServer:
             if target == persona_name and benefactor != persona_name:
                 return True
         return False
+
+    def sync_persona_to_table_history_end(self, persona, table_name):
+        table = self.room.locations[table_name]
+        persona.scratch.dialogue_cursors[table_name] = len(table.dialogue_history)
+        persona.scratch.event_cursors[table_name] = len(table.event_history)
 
     def add_lock_if_allowed(self, table, benefactor, target_name, role):
         target = table.personas[target_name]
@@ -150,6 +153,8 @@ class ThreeEstatesServer:
             random_pool = list(roles)
             random.shuffle(random_pool)
             for filename in os.listdir(save_file):
+                if filename in NON_PERSONA_SESSION_DIRS:
+                    continue
                 persona_path = os.path.join(save_file, filename)
                 if not os.path.isdir(persona_path):
                     continue
@@ -200,6 +205,7 @@ class ThreeEstatesServer:
             persona.scratch.curr_loc = starting_table
             persona.scratch.dialogue_cursors = {}
             persona.scratch.overheard_dialogue_cursors = {}
+            persona.scratch.event_cursors = {}
             persona.scratch.recent_conversation = []
             self.room.locations[starting_table].personas[persona.scratch.name] = persona
             if debug:
@@ -237,11 +243,13 @@ class ThreeEstatesServer:
                                 continue
                             next_loc = decide_on_leaving(persona, table, retrieved_all_tables)
                             if next_loc != "stay": # moving to another location and getting it resolved before the bidding even starts
-                                persona.scratch.movement_cooldown = 4
+                                persona.scratch.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
                                 self.clear_table_locks(table, persona_name)
                                 to_remove.append((persona_name, next_loc))
                                 #self.room.locations[next_loc].personas[persona.name] = persona
                                 self.room.locations[next_loc].incoming_arrivals.add((persona_name, None, table_name))
+                            else:
+                                persona.scratch.movement_cooldown = MOVEMENT_STAY_COOLDOWN_STEPS
 
                 # We'll also reset the Bishop trigger only here after bidding for THIS round has completed and to reserve Bishop acting for the NEXT ROUND
                 if table.removal_targets or to_remove:
@@ -330,7 +338,6 @@ class ThreeEstatesServer:
                     if target_name in table.personas:
                         del table.personas[target_name]
 
-            # TODO: (MUST FIX) SOMEHOW a person leaving for another table reads info from the destination table?
             # We then finally allow the incomers across all tables to join in
             for table_name, table in self.room.locations.items():
                 innkeeper = None
@@ -339,6 +346,7 @@ class ThreeEstatesServer:
                 for candidate, benefactor, source_table in table.incoming_arrivals:
                     if table.lockdown_targets:
                         self.clear_table_locks(table, candidate)
+                    self.sync_persona_to_table_history_end(self.personas[candidate], table_name)
                     table.personas[candidate] = self.personas[candidate]
                     act_desp = f"{candidate} arrives from {source_table}"
                     arrival_event = (candidate, None, act_desp, self.personas[candidate].scratch.curr_time, set([candidate]))

@@ -48,7 +48,12 @@ def perceive(persona, room):
   # extended across multiple locations).
 
   self_table_ret_events = []
-  for event in room.locations[persona.scratch.curr_loc].current_events:
+  current_table = room.locations[persona.scratch.curr_loc]
+  local_event_cursor = persona.scratch.event_cursors.get(persona.scratch.curr_loc, 0)
+  local_events = current_table.event_history[local_event_cursor:]
+  persona.scratch.event_cursors[persona.scratch.curr_loc] = len(current_table.event_history)
+
+  for event in local_events:
     s, o, description, timestamp, keywords = event
     event_poignancy = generate_poig_score(persona, "event", description)
     desc_embedding_in = description
@@ -64,7 +69,6 @@ def perceive(persona, room):
     persona.scratch.importance_trigger_curr -= event_poignancy
     # note: for now only local table events themselves count down the trigger?
   # current_event = (subject, object, act_desp, timestamp, keywords)
-  current_table = room.locations[persona.scratch.curr_loc]
   local_cursor = persona.scratch.dialogue_cursors.get(persona.scratch.curr_loc, 0)
   local_dialogue = current_table.dialogue_history[local_cursor:]
   persona.scratch.dialogue_cursors[persona.scratch.curr_loc] = len(current_table.dialogue_history)
@@ -94,9 +98,6 @@ def perceive(persona, room):
     overheard_cursor = persona.scratch.overheard_dialogue_cursors.get(other_table, 0)
     overheard_dialogue = other_location.dialogue_history[overheard_cursor:]
     persona.scratch.overheard_dialogue_cursors[other_table] = len(other_location.dialogue_history)
-    # TODO: deduplicate each perception step
-    # as in rewrite how self/other_table ret events even work
-    # and actually USE the associative memory (or not?)
     for utterance in overheard_dialogue:
       s_chat, o_chat, volume, line, timestamp_chat, keywords_chat = utterance
       if volume == "practically screaming":
