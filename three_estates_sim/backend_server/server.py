@@ -475,10 +475,10 @@ class ThreeEstatesServer:
                         table.bishop_trigger = True
                     table.removal_targets = set()
                     for name, destination in to_remove:
-                        event_msg = f"{name} leaves for {destination}."
-                        table.add_table_event((name, None, event_msg, self.curr_time, set([name])))
                         special_circumstance = f"you have decided to leave {table.name} for {destination}; as parting words before you depart,"
                         self.personas[name].speak(table, special_circumstance)
+                        event_msg = f"{name} leaves for {destination}."
+                        table.add_table_event((name, None, event_msg, self.curr_time, set([name])))
                         self.personas[name].scratch.curr_loc = destination
                         del table.personas[name]
 
@@ -587,6 +587,7 @@ class ThreeEstatesServer:
                 for table_name, table in self.room.locations.items():
                     table.current_events = []
                     table.current_lines = []
+                self.save_checkpoint("timestep_complete")
 
             results = resolve_endgame(self.room)
             print("Final results:")
@@ -599,8 +600,11 @@ class ThreeEstatesServer:
             self.save_checkpoint("game_end")
             time.sleep(self.server_sleep)
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received. Saving game state and stopping.")
-            self.save_checkpoint("keyboard_interrupt")
+            print("\nKeyboard interrupt received. Stopping without saving a mid-timestep state.")
+            if os.path.isfile(self.session_state_path()):
+                print(f"Resume will use the latest stable checkpoint: {self.session_state_path()}")
+            else:
+                print("No stable checkpoint exists yet, so there is no game state to resume from.")
             return
 
 
