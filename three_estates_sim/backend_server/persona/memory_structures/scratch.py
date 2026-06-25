@@ -101,8 +101,9 @@ class Scratch:
 
         self.role = scratch_load.get("role", self.role)
         self.current_bidding_scores = scratch_load["current_bidding_scores"]
-        self.cards_slot = set(scratch_load["cards_slot"])
-        if not self.cards_slot:
+        if "cards_slot" in scratch_load:
+          self.cards_slot = set(scratch_load["cards_slot"])
+        else:
           self.cards_slot = {self.role}
         self.recent_conversation = scratch_load["recent_conversation"]
         self.win_progress = scratch_load["win_progress"]

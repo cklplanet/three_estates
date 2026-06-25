@@ -21,7 +21,7 @@ Given that {special_circumstance}, please decide exactly what you want to say IM
 - Convey whatever immediate emotions you have, surprise, anger, dread, joy, etc
 - Be threatening or accusatory
 - Or be laconic and cryptic
-- Additionally, you can weaponize the fact that loud voices CAN be potentially heard by other tables
+- Additionally, you can weaponize the fact that loud voices CAN be potentially heard by other tables (ONLY "practically screaming" volume can be heard by other tables; just "loud" is not enough)
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.

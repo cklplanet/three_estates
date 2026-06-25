@@ -32,7 +32,6 @@ def bid(persona, table):
   if table_size > 1 and role in persona.scratch.cards_slot: # if there isn't any other person at the table don't even bother bidding for the ability
     if (
         (role == "Bishop" and table.bishop_trigger) or
-        (role == "Baron" and table.baron_trigger and table_size > 2) or
         (role in {"Priest", "Thief", "Nun"} and table_size == 2) or
         (role == "Innkeeper" and table.name != "Village") or
         (role == "Spinster" and table.name == "Forest") or
@@ -83,7 +82,9 @@ def decide_on_leaving(persona, table, retrieved_all_tables):
     run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables),
     {"reasoning": "I do not have a strong reason to leave right now.", "option": "stay"}
   )
-  option = movement_dict["option"]
+  requested_option = movement_dict["option"]
+  option = requested_option
   if option not in table.connected and option != "stay":
-    return "stay"
+    option = "stay"
+  debug_movement(persona, table, requested_option, option, movement_dict["reasoning"])
   return option

@@ -51,10 +51,6 @@ def ability_trigger(persona, table):
         elif persona.scratch.role == "Bishop":
             if table.bishop_trigger == True:
                 trigger_message = f"Since at least one player has just made their departure, you have the option to stay and trigger your ability.\n"
-        elif persona.scratch.role == "Baron":
-            if table.baron_trigger:
-                ability_objects = " and ".join(list(table.baron_trigger))
-                trigger_message = f"Since {ability_objects} has/have just revealed their card, you have the option to stay and trigger your ability.\n"
         elif persona.scratch.role == "Innkeeper":
             if persona.scratch.ability_active == False:
                 if persona.scratch.curr_loc == "Village":
