@@ -1,9 +1,26 @@
 import datetime
+import os
 from pathlib import Path
-from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT
+from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT
 
-# Copy and paste your OpenAI API Key
-OPENROUTER_KEY = "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"
+def read_local_env_value(key):
+    for env_path in (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env"):
+        if not env_path.is_file():
+            continue
+        with open(env_path) as infile:
+            for raw_line in infile:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                env_key, env_value = line.split("=", 1)
+                if env_key.strip() == key:
+                    return env_value.strip().strip('"').strip("'")
+    return None
+
+
+OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER_KEY") or "YOUR_API_KEY_HERE"
+CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
+GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
 # Put your name
 key_owner = "<Name>"
 
