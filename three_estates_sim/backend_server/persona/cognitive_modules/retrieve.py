@@ -65,19 +65,19 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
     retrieved_all_tables = dict()
     for table_name, table in room.locations.items():
         retrieved_all_tables[table_name] = dict()
-        for persona_name, p in table.personas.items():
+        for persona_name in table.personas:
             retrieved_all_tables[table_name][persona_name] = {
                 "events": [],
                 "thoughts": []
             }
             relevant_events = set()
-            relevant_events.update(p.a_mem.retrieve_relevant_events(persona_name, None))
-            relevant_events.update(p.a_mem.retrieve_relevant_events(None, persona_name))
+            relevant_events.update(persona.a_mem.retrieve_relevant_events(persona_name, None))
+            relevant_events.update(persona.a_mem.retrieve_relevant_events(None, persona_name))
             retrieved_all_tables[table_name][persona_name]["events"] += list(relevant_events)
 
             relevant_thoughts = set()
-            relevant_thoughts.update(p.a_mem.retrieve_relevant_thoughts(persona_name, None))
-            relevant_thoughts.update(p.a_mem.retrieve_relevant_thoughts(None, persona_name))
+            relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(persona_name, None))
+            relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(None, persona_name))
             retrieved_all_tables[table_name][persona_name]["thoughts"] += list(relevant_thoughts)
     #retrieved_self format: {description: {"curr_event": event node, "events": list of event nodes, "thoughts": list of event nodes}}
     #retrieved_lines_related: {line_content: list of event nodes, line_2_content: list of event nodes, etc.}

@@ -81,6 +81,20 @@ def run_gpt_prompt_generate_relationship(character_group_context, persona1, pers
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   if output != False: 
     return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_vn_epilogue(epilogue_context, test_input=None, verbose=False):
+  data = {
+    "PREFIX": PREFIX,
+    "epilogue_context": epilogue_context
+  }
+  prompt_template = "persona/prompt_template/templates/generate_vn_epilogue.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup)
+  if output != False:
+    return output, [output, prompt, data]
   
 
 def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=None, verbose=False): 
@@ -95,6 +109,8 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
     "current_table_events": data['current_table_events'],
     "current_table_additional_context": data['current_table_additional_context'],
     "stay_at_table_reason": data['stay_at_table_reason'],
+    "table_time_left": data['table_time_left'],
+    "all_table_time_left": data['all_table_time_left'],
     "total_time_left": data['total_time_left'],
   }
 
@@ -125,6 +141,8 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
     "current_table_events": data['current_table_events'],
     "current_table_additional_context": data['current_table_additional_context'],
     "stay_at_table_reason": data['stay_at_table_reason'],
+    "table_time_left": data['table_time_left'],
+    "all_table_time_left": data['all_table_time_left'],
     "total_time_left": data['total_time_left'],
   }
 
@@ -263,6 +281,11 @@ def get_bidding_common_data(persona, table):
         else:
           other_table_additional_context += (f"\t({time_ago} ago)"+ event.description + f" at the {event.table} table\n")
 
+  table_time_left = timedelta_to_natural(TIMERS[persona.scratch.curr_loc] - persona.scratch.curr_time)
+  all_table_time_left = "\n".join(
+    f"- {table_name}: {timedelta_to_natural(TIMERS[table_name] - persona.scratch.curr_time)} until players there can no longer leave"
+    for table_name in TIMERS.keys()
+  )
   total_time_left = timedelta_to_natural(TIMERS["Village"] - persona.scratch.curr_time)
 
   recent_conversation = ""
@@ -300,6 +323,8 @@ def get_bidding_common_data(persona, table):
     "current_table_additional_context": current_table_additional_context,
     "other_table_additional_context": other_table_additional_context,
     "stay_at_table_reason": stay_at_table_reason,
+    "table_time_left": table_time_left,
+    "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
   }
 
@@ -325,7 +350,8 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
   external_table_context = ""
   for table_name, dict in retrieved_all_tables.items():
-    new_line = f"Players currently seated at the {table_name} table:"      
+    table_timer_left = timedelta_to_natural(TIMERS[table_name] - persona.scratch.curr_time)
+    new_line = f"Players currently seated at the {table_name} table ({table_timer_left} until players there can no longer leave):"
     if persona.scratch.curr_loc == table_name:
       new_line += ", which is your table"
       new_line += ":\n"
@@ -345,6 +371,10 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
   ability_msg = ability_trigger(persona, table)
 
   table_time_left = timedelta_to_natural(TIMERS[persona.scratch.curr_loc] - persona.scratch.curr_time)
+  all_table_time_left = "\n".join(
+    f"- {table_name}: {timedelta_to_natural(TIMERS[table_name] - persona.scratch.curr_time)} until players there can no longer leave"
+    for table_name in retrieved_all_tables.keys()
+  )
   total_time_left = timedelta_to_natural(TIMERS["Village"] - persona.scratch.curr_time)
 
   current_table = persona.scratch.curr_loc
@@ -371,6 +401,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "current_table": current_table,
     "other_options": other_options,
     "table_time_left": table_time_left,
+    "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
     "options": options
   }
@@ -445,6 +476,31 @@ def run_gpt_prompt_guess_family_bishop(persona, target, table, test_input=None, 
     return output, [output, prompt, data_sub]
 
 
+def run_gpt_prompt_spinster_endgame_guess(persona, table, test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table)
+  targets = [name for name in table.personas if name != persona.scratch.name]
+  target_list = "\n".join(f"- {name}" for name in targets) or "- No other players at your table."
+  role_options = " | ".join(ROLE_DICT.keys())
+  data_sub = {
+    "PREFIX": PREFIX,
+    "personal_context_msg": data["personal_context_msg"],
+    "current_table_context": data["current_table_context"],
+    "recent_conversation": data["recent_conversation"],
+    "current_table_events": data["current_table_events"],
+    "current_table_additional_context": data["current_table_additional_context"],
+    "other_table_additional_context": data["other_table_additional_context"],
+    "target_list": target_list,
+    "role_options": role_options,
+  }
+  prompt_template = "persona/prompt_template/templates/spinster_endgame_guess.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data_sub)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  if output != False:
+    return output, [output, prompt, data_sub]
+
+
 def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_context, test_input=None, verbose=False):
   data = get_bidding_common_data(persona, table)
   data_sub = {
@@ -456,12 +512,36 @@ def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_co
     "current_table_additional_context": data["current_table_additional_context"],
     "other_table_additional_context": data["other_table_additional_context"],
     "stay_at_table_reason": data["stay_at_table_reason"],
+    "table_time_left": data["table_time_left"],
     "total_time_left": data["total_time_left"],
     "revealed_player_name": revealed_player.scratch.name,
     "revealed_player_role": revealed_player.scratch.role,
     "action_context": action_context,
   }
   prompt_template = "persona/prompt_template/templates/decide_baron_block.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data_sub)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  if output != False:
+    return output, [output, prompt, data_sub]
+
+
+def run_gpt_prompt_decide_innkeeper_declaration(persona, table, source_table, test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table)
+  data_sub = {
+    "PREFIX": PREFIX,
+    "personal_context_msg": data["personal_context_msg"],
+    "current_table_context": data["current_table_context"],
+    "recent_conversation": data["recent_conversation"],
+    "current_table_events": data["current_table_events"],
+    "current_table_additional_context": data["current_table_additional_context"],
+    "other_table_additional_context": data["other_table_additional_context"],
+    "table_time_left": data["table_time_left"],
+    "total_time_left": data["total_time_left"],
+    "source_table": source_table,
+  }
+  prompt_template = "persona/prompt_template/templates/decide_innkeeper_declaration.txt"
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
@@ -558,7 +638,7 @@ def run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts,
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
   data = dict()
   subject_event_details = ""
-  for event in subject_events[focal_point]:
+  for event in subject_events.get(focal_point, []):
     time_ago = timedelta_to_natural(persona.scratch.curr_time - event.created)
     if event.type == "chat":
       subject_event_details += (f"({time_ago} ago)" + event.description + "\n")
@@ -570,7 +650,8 @@ def run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts,
     time_ago = timedelta_to_natural(persona.scratch.curr_time - thought.created)
     subject_thought_details += (f"You concluded {time_ago} ago that: " + thought.description + "\n")
 
-  data = {"subject_thought_details":subject_thought_details,
+  data = {"PREFIX": PREFIX,
+       "subject_thought_details":subject_thought_details,
        "subject_event_details":subject_event_details,
        "question":focal_point}
   prompt_template = "persona/prompt_template/templates/reflect_person_personality.txt"
@@ -580,4 +661,38 @@ def run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts,
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
   if output != False: 
+    return output, [output, prompt, data]
+
+
+def run_gpt_prompt_reflect_on_board_state(persona, focal_retrievals, prior_board_thoughts, test_input=None, verbose=False):
+  focal_retrieval_details = ""
+  for focal_point, nodes in focal_retrievals.items():
+    focal_retrieval_details += f"\nQuestion: {focal_point}\n"
+    if not nodes:
+      focal_retrieval_details += "- No retrieved evidence.\n"
+      continue
+    for node in nodes:
+      time_ago = timedelta_to_natural(persona.scratch.curr_time - node.created)
+      table_text = f" at the {node.table} table" if node.table else ""
+      focal_retrieval_details += f"- ({time_ago} ago) [{node.type}] {node.description}{table_text}\n"
+
+  prior_thought_details = ""
+  for thought in prior_board_thoughts:
+    time_ago = timedelta_to_natural(persona.scratch.curr_time - thought.created)
+    prior_thought_details += f"- ({time_ago} ago) {thought.description}\n"
+  if not prior_thought_details:
+    prior_thought_details = "No prior board-state thoughts.\n"
+
+  data = {
+    "PREFIX": PREFIX,
+    "personal_context_msg": persona.get_personal_game_context(),
+    "prior_thought_details": prior_thought_details,
+    "focal_retrieval_details": focal_retrieval_details,
+  }
+  prompt_template = "persona/prompt_template/templates/reflect_board_state.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  if output != False:
     return output, [output, prompt, data]

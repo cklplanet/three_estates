@@ -7,6 +7,7 @@ Description: This defines the "Plan" module for generative agents.
 import datetime
 import math
 import random 
+import re
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,46 @@ REVEAL_MULTIPLIER = 1
 SPEAK_MULTIPLIER = 1.5
 
 
+def movement_reasoning_keywords(persona, table, option, reasoning):
+  keywords = {persona.scratch.name, table.name, option, "movement", "stay" if option == "stay" else "leave"}
+  for table_name in persona.room.locations.keys():
+    if table_name.lower() in reasoning.lower() or table_name == option or table_name == table.name:
+      keywords.add(table_name)
+  for player_name in persona.room.personas.keys():
+    if player_name == persona.scratch.name or re.search(rf"(?<!\\w){re.escape(player_name)}(?!\\w)", reasoning, re.IGNORECASE):
+      keywords.add(player_name)
+  role_words = set(ROLE_DICT.keys()) | {role_data["family"] for role_data in ROLE_DICT.values()}
+  for word in role_words:
+    if word.lower() in reasoning.lower():
+      keywords.add(word)
+  return keywords
+
+
+def remember_movement_reasoning(persona, table, requested_option, final_option, reasoning):
+  adjusted = "" if requested_option == final_option else f" I originally considered {requested_option}, but that was not a valid move."
+  if final_option == "stay":
+    description = f"I decided to stay at {table.name} because {reasoning}.{adjusted}"
+    poignancy = 3
+  else:
+    description = f"I decided to leave {table.name} for {final_option} because {reasoning}.{adjusted}"
+    poignancy = 5
+  if description in persona.a_mem.embeddings:
+    return
+  embedding = get_embedding(description)
+  expiration = persona.scratch.curr_time + datetime.timedelta(days=30)
+  keywords = movement_reasoning_keywords(persona, table, final_option, reasoning)
+  persona.a_mem.add_thought(
+    persona.scratch.curr_time,
+    expiration,
+    persona.scratch.name,
+    persona.scratch.name,
+    description,
+    keywords,
+    poignancy,
+    (description, embedding),
+  )
+
+
 def bid(persona, table):
   table_size = len(table.personas.keys())
   role = persona.scratch.role
@@ -29,13 +70,18 @@ def bid(persona, table):
   # Default ability bid is 0 (not usable)
   ability_bid = 0
   # Check conditions for ability being allowed
-  if table_size > 1 and role in persona.scratch.cards_slot: # if there isn't any other person at the table don't even bother bidding for the ability
+  if role in persona.scratch.cards_slot:
     if (
-        (role == "Bishop" and table.bishop_trigger) or
-        (role in {"Priest", "Thief", "Nun"} and table_size == 2) or
-        (role == "Innkeeper" and table.name != "Village") or
-        (role == "Spinster" and table.name == "Forest") or
-        (role in {"King", "Queen"} and table_size > 1)
+        (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or
+        (
+          table_size > 1 and (
+            (role == "Bishop" and table.bishop_trigger) or
+            (role in {"Priest", "Thief", "Nun"} and table_size == 2) or
+            (role == "Spinster" and table.name == "Forest" and not table.timer_expired) or
+            (role == "King") or
+            (role == "Queen" and not table.timer_expired)
+          )
+        )
     ):
         # If conditions are satisfied, allow ability bidding
         ability_bid_dict = prompt_dict(
@@ -47,10 +93,16 @@ def bid(persona, table):
         ability_bid = ABILITY_MULTIPLIER * ability_bid
         persona.scratch.current_bidding_scores['ability'] = ability_bid
         debug_bid(persona, table, "ability", ability_bid, ability_bid_dict["reasoning"])
-  reveal_bid_dict = prompt_dict(
-    run_gpt_prompt_act_bidding_reveal(persona, table),
-    {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
-  )
+  if role not in persona.scratch.cards_slot:
+    reveal_bid_dict = {
+      "reasoning": f"I cannot reveal my {role} card because I do not currently have it.",
+      "bid": "0"
+    }
+  else:
+    reveal_bid_dict = prompt_dict(
+      run_gpt_prompt_act_bidding_reveal(persona, table),
+      {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
+    )
   persona.scratch.act_reasoning = reveal_bid_dict["reasoning"]
   reveal_bid = bounded_int(reveal_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 5})
   debug_bid(persona, table, "reveal", REVEAL_MULTIPLIER * reveal_bid, reveal_bid_dict["reasoning"])
@@ -87,4 +139,5 @@ def decide_on_leaving(persona, table, retrieved_all_tables):
   if option not in table.connected and option != "stay":
     option = "stay"
   debug_movement(persona, table, requested_option, option, movement_dict["reasoning"])
+  remember_movement_reasoning(persona, table, requested_option, option, movement_dict["reasoning"])
   return option

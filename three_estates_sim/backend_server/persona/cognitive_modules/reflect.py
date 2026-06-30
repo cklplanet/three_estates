@@ -23,28 +23,25 @@ from persona.cognitive_modules.retrieve import *
 def generate_poig_score(persona, event_type, description): 
   if debug: print ("GNS FUNCTION: <generate_poig_score>")
 
-  if "is idle" in description: 
-    return 1
-
-  if event_type == "event" or event_type == "thought": 
-    return bounded_int(prompt_payload(run_gpt_prompt_event_poignancy(persona, description), 1), 1, minimum=1, maximum=10)
-  elif event_type == "chat": 
-    return bounded_int(prompt_payload(run_gpt_prompt_chat_poignancy(persona, description), 1), 1, minimum=1, maximum=10)
+  return bounded_int(
+    heuristic_poignancy_score(persona, event_type, description),
+    1,
+    minimum=1,
+    maximum=10
+  )
 
 
 
 def run_reflect(persona):
   """
-  Run the actual reflection. We generate the focal points, retrieve any 
-  relevant nodes, and generate thoughts and insights. 
+  Run reflection. Retrieve across board-wide and per-person focal questions,
+  create one board thought, and update the persona's own win progress.
 
   INPUT: 
     persona: Current Persona object
   Output: 
     None
   """
-  # Reflection requires certain focal points. Generate that first. 
-  # make focal point MUCH more object-based
   def filter_nonoverlapping_events(chat_dict, existing_events):
         all_existing_ids = {e.description for e in existing_events}
         filtered_events = {}
@@ -53,73 +50,83 @@ def run_reflect(persona):
             if filtered_vlist:
                 filtered_events[k] = filtered_vlist
         return filtered_events
-  
+
   obj = "her" if persona.scratch.gender == "female" else "him"
-  subj = "she" if persona.scratch.gender == "female" else "he"
   poss = "her" if persona.scratch.gender == "female" else "his"
+  room_personas = getattr(getattr(persona, "room", None), "personas", {})
   nodes = []
-  # nodes here represent EVERY event and chat
   subjects = set()
   for i in (persona.a_mem.seq_event + persona.a_mem.seq_chat):
-    subjects.update(i.keywords)
+    subjects.update(keyword for keyword in i.keywords if keyword in room_personas or keyword == persona.scratch.name)
     nodes.append([i.last_accessed, i])
+  subjects.update(room_personas.keys())
 
-  nodes = sorted(nodes, key=lambda x: x[0]) # resort by LAST ACCESSED
-  nodes = [i for created, i in nodes] # get rid of the timestamp apparently
-  nodes = nodes[-1*persona.scratch.importance_ele_n:] # the time filter
+  nodes = sorted(nodes, key=lambda x: x[0])
+  nodes = [i for created, i in nodes]
+  nodes = nodes[-1*persona.scratch.importance_ele_n:]
 
-  for subject in subjects:
-    # not yourself
-    if subject != persona.scratch.name:
-      subject_nodes = [node for node in nodes if subject in node.keywords]
-      
-      focal_points = [f"How honest or reliable is {subject}'s words? Are there any contradictions in {poss} words? Hidden motives behind {poss} actions? Being unusually quiet?",
-                      f"Do you feel if {subject} can be a potential ally, foe, or useful tool (and whether or not it is related to {poss} win conditions synergizing with yours or not)?",
-                      f"What is {subject}'s role (or family) and have they revealed and seemingly revealed it {obj}self? If you're still not sure what their role (or family) is, can you make an educated guess?",
-                      f"What other people might {subject} have been colluding with? What other person/people might f{subject} have special relationship with outside of the game, and what kind?",
-                      f"Based on your knowledge or guess of {subject}'s family or role so far, how close is {subject} to fulfilling {poss} win condition? If you have no clue yet, it's okay to admit."]
-      subject_thoughts = [thought for thought in persona.a_mem.seq_thought if subject == thought.o]
-      # collect all the thoughts with the subject as, you know, the subject
-      subject_thoughts = sorted(subject_thoughts, key=lambda x: x[0]) # resort by LAST ACCESSED
-      subject_thoughts = [i for created, i in subject_thoughts] # get rid of the timestamp apparently
-      subject_thoughts = subject_thoughts[-5:] # the recency filter
-      for focal_point in focal_points:
-        retrieved = new_retrieve(persona, [focal_point])
-        subject_events = filter_nonoverlapping_events(retrieved, subject_nodes)
-        thought_dict = prompt_dict(
-          run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts, focal_point),
-          {
-            "reasoning": "I do not have enough reliable new evidence to revise this belief.",
-            "summary": f"I do not yet have a confident read on {subject}."
-          }
-        )
-        thought = thought_dict["summary"]
-        thought_embedding_pair = (thought, get_embedding(thought))
-        created = persona.scratch.curr_time
-        expiration = persona.scratch.curr_time + datetime.timedelta(days=30)
-        s = persona.scratch.name
-        o = subject
-        thought_poignancy = generate_poig_score(persona, "thought", thought)
-        keywords = set([s,o])
-        # format: {focal point: [list of nodes]}
-        persona.a_mem.add_thought(created, expiration, s, o, 
-                                  thought, keywords, thought_poignancy, 
-                                  thought_embedding_pair)
-    else: # yah it's me
-      my_nodes = [node for node in nodes if persona.scratch.name in node.keywords]
-      focal_point = f"Give your own family and role, how close are you, aka {persona.scratch.name} to fulfilling your own win condition? If you have no clue yet, it's okay to admit."
-      my_relevant_thoughts = [thought for thought in persona.a_mem.seq_thought if persona.scratch.name in thought.keywords]
-      # EVERY thought relevant to me
-      retrieved = new_retrieve(persona, [focal_point])
-      my_relevant_events = filter_nonoverlapping_events(retrieved, my_nodes)
-      thought_dict = prompt_dict(
-        run_gpt_prompt_reflect_on_subject(persona, my_relevant_events, my_relevant_thoughts, focal_point),
-        {
-          "reasoning": "I do not have enough reliable new evidence to update my progress.",
-          "summary": "I am still assessing whether my current table helps my win condition."
-        }
-      )
-      persona.scratch.win_progress = thought_dict["summary"]
+  if not subjects:
+    return
+
+  board_focal_points = [
+    "Across the whole board, what can be observed about each player's likely role, family, card status, and public credibility?",
+    "Across the whole board, what can be observed about each player's current win condition progress or obstacles?",
+    "Across the whole board, what open or hidden alliances, rivalries, bargains, coercion, or relationship patterns are shaping the game?"
+  ]
+  subject_focal_points = {}
+  for subject in sorted(subjects):
+    subject_focal_points[subject] = [
+      f"What is {subject}'s confirmed or suspected role/family and card status, separating card-backed proof from verbal claims?",
+      f"How close is {subject} to fulfilling their win condition, and what table/player arrangements help or hurt them?",
+      f"What alliances, rivalries, bargains, coercion, reliability problems, or hidden motives involve {subject}?"
+    ]
+
+  focal_points = list(board_focal_points)
+  for questions in subject_focal_points.values():
+    focal_points.extend(questions)
+
+  retrieved = new_retrieve(persona, focal_points, 10)
+  focal_retrievals = {
+    focal_point: retrieved.get(focal_point, [])
+    for focal_point in focal_points
+  }
+  prior_board_thoughts = sorted(
+    [thought for thought in persona.a_mem.seq_thought if thought.object == "board"],
+    key=lambda thought: thought.last_accessed
+  )[-5:]
+  thought_dict = prompt_dict(
+    run_gpt_prompt_reflect_on_board_state(persona, focal_retrievals, prior_board_thoughts),
+    {
+      "reasoning": "I do not have enough reliable evidence to fully update the board.",
+      "summary": "I am still tracking each player's role, win-condition progress, alliances, and rivalries, but the board remains uncertain."
+    }
+  )
+  thought = thought_dict["summary"]
+  thought_embedding_pair = (thought, get_embedding(thought))
+  created = persona.scratch.curr_time
+  expiration = persona.scratch.curr_time + datetime.timedelta(days=30)
+  keywords = {persona.scratch.name, "board", "roles", "win conditions", "alliances", "rivalries"} | set(subjects)
+  for role, role_data in ROLE_DICT.items():
+    if role.lower() in thought.lower() or role_data["family"].lower() in thought.lower():
+      keywords.add(role)
+      keywords.add(role_data["family"])
+  persona.a_mem.add_thought(created, expiration, persona.scratch.name, "board",
+                            thought, keywords, generate_poig_score(persona, "thought", thought),
+                            thought_embedding_pair)
+
+  my_nodes = [node for node in nodes if persona.scratch.name in node.keywords]
+  focal_point = f"Given the whole board, my role as {persona.scratch.role}, my card status, and current table state, how close am I, {persona.scratch.name}, to fulfilling my own win condition?"
+  my_relevant_thoughts = [thought for thought in persona.a_mem.seq_thought if persona.scratch.name in thought.keywords or thought.object == "board"]
+  retrieved = new_retrieve(persona, [focal_point])
+  my_relevant_events = filter_nonoverlapping_events(retrieved, my_nodes)
+  thought_dict = prompt_dict(
+    run_gpt_prompt_reflect_on_subject(persona, my_relevant_events, my_relevant_thoughts[-8:], focal_point),
+    {
+      "reasoning": "I do not have enough reliable new evidence to update my progress.",
+      "summary": "I am still assessing whether my current table helps my win condition."
+    }
+  )
+  persona.scratch.win_progress = thought_dict["summary"]
   
     
 

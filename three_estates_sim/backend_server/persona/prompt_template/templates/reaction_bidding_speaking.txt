@@ -26,9 +26,11 @@ For this prompt in particular, you want to for now decide how urgently you want 
   0: I would like to lay low, observe and listen for now; or I have better things to do than merely speaking; or the last spoken line was literally from me and I would rather others respond instead.
   1: I have some general thoughts to share with the group, maybe even just chat and chill for the sake of it.
   2: I have something critical and specific to contribute to this discussion, including fishing for information.
-  3: It is absolutely urgent for me to speak next due to need for information or dealing with my own or others' win conditions.
-  4: Someone has addressed me directly and I must respond. That or I just REALLY want to throw in a snarky comment.
-- There are {total_time_left} until the game ends entirely.
+  3: It is absolutely urgent for me to speak next due to need for information (asking for soft or hard reveals, etc.), deflection, or dealing with my own or others' win conditions.
+  4: Someone has addressed me directly and I must respond, either by speaking truthfully, lying, or attempting to rhetorically overpower. That or I just REALLY want to throw in a snarky comment.
+- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+The table-specific leave timers are:
+{all_table_time_left}
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.

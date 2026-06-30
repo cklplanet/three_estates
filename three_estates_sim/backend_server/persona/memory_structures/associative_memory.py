@@ -101,8 +101,10 @@ class AssociativeMemory:
         description = node_details["description"]
         embedding_pair = (node_details["embedding_key"], 
                           self.embeddings[node_details["embedding_key"]])
-        poignancy =node_details["poignancy"]
+        poignancy = node_details["poignancy"]
         keywords = set(node_details["keywords"])
+        if node_type == "event":
+          poignancy = heuristic_poignancy_score(name, node_type, description, s, o, keywords)
         
         if node_type == "event": 
           self.add_event(created, s, o, node_table,

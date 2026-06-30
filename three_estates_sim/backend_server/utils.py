@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 from pathlib import Path
 from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT
 
@@ -42,6 +43,7 @@ MOVEMENT_LEAVE_COOLDOWN_STEPS = 4
 MOVEMENT_STAY_COOLDOWN_STEPS = 2
 SPEAKING_COOLDOWN_STEPS = 1
 DIALOGUE_LOG_PATH = None
+CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
 
 
@@ -100,7 +102,7 @@ ROLE_DICT = {
     },
     "Innkeeper": {
         "family": "Commoners",
-        "ability": "Upon entering the Villag from elsewhere, may declare the role. If declared, no one can leave the Village until either the Innkeeper leaves or another player enters.",
+        "ability": "Upon entering the Village from elsewhere, may reveal the Innkeeper card and declare the role. If revealed and declared, no one can leave the Village until either the Innkeeper leaves or another player enters.",
         "win_condition": "Wins if sitting with at least two nobles at game end."
     },
     "Nun": {
@@ -118,6 +120,76 @@ ROLE_DICT = {
 TIMERS = {"Castle": datetime.timedelta(minutes=6),
           "Forest": datetime.timedelta(minutes=7),
           "Village": datetime.timedelta(minutes=8)}
+
+
+def heuristic_poignancy_score(persona, event_type, description, subject=None, obj=None, keywords=None):
+    """Deterministic game-aware memory importance score from 1 to 10."""
+    if isinstance(persona, str):
+        persona_name = persona
+    else:
+        persona_name = getattr(getattr(persona, "scratch", None), "name", None)
+    keywords = set(keywords or [])
+    text = str(description or "")
+    text_without_audience = text.split("[People physically present", 1)[0]
+    lower = text_without_audience.lower()
+    subject_text = str(subject or "")
+    object_text = str(obj or "")
+
+    if "is idle" in lower:
+        return 1
+
+    if persona_name:
+        persona_lower = persona_name.lower()
+        direct_participants = {subject_text, object_text}
+        directly_named = persona_lower in lower
+        directly_involved = persona_name in direct_participants
+        if event_type != "chat" and persona_name in keywords:
+            directly_involved = True
+        if directly_involved or directly_named:
+            return 10
+
+    high_proof_patterns = [
+        r"\breveals?\b.*\bcard\b",
+        r"\battempts? to use\b",
+        r"\buses?\b.*\bability\b",
+        r"\bforces?\b.*\breveal\b",
+        r"\bblocks?\b",
+        r"\bsteals?\b",
+        r"\blocks? down\b",
+        r"\bforcefully swaps?\b",
+        r"\bretrieves?\b.*\bcard\b",
+        r"\bgives?\b.*\bcard\b",
+    ]
+    if any(re.search(pattern, lower) for pattern in high_proof_patterns):
+        return 7
+
+    movement_patterns = [
+        r"\bleaves for\b",
+        r"\barrives from\b",
+    ]
+    if any(re.search(pattern, lower) for pattern in movement_patterns):
+        return 1
+
+    roles_and_families = set(ROLE_DICT.keys()) | {"nobility", "noble", "commoner", "commoners", "clergy"}
+    role_pattern = "|".join(re.escape(term.lower()) for term in sorted(roles_and_families, key=len, reverse=True))
+    unproven_reveal = (
+        event_type == "chat"
+        and (
+            (re.search(r"\bclaim(?:s|ed|ing)?\b", lower) and re.search(role_pattern, lower))
+            or (re.search(r"\breveal(?:s|ed|ing)?\b", lower) and "card" not in lower)
+            or re.search(rf"\b(i am|i'm|im|my family is|my role is|am of the)\b[^.\n]*\b({role_pattern})\b", lower)
+        )
+    )
+    if unproven_reveal:
+        return 4
+
+    if "practically screaming" in lower:
+        return 5
+    if event_type == "event":
+        return 3
+    if event_type == "thought":
+        return 3
+    return 2
 
 
 def prompt_payload(prompt_result, default=None):
@@ -168,6 +240,13 @@ def set_dialogue_log_path(path):
         outfile.write(f"# Three Estates table log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
 
 
+def set_clean_dialogue_log_path(path):
+    global CLEAN_DIALOGUE_LOG_PATH
+    CLEAN_DIALOGUE_LOG_PATH = Path(path)
+    CLEAN_DIALOGUE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CLEAN_DIALOGUE_LOG_PATH.touch(exist_ok=True)
+
+
 def set_debug_log_path(path):
     global DEBUG_LOG_PATH
     DEBUG_LOG_PATH = Path(path)
@@ -187,21 +266,25 @@ def debug_log(message):
 
 
 def write_table_event_log(table_name, event_tuple):
-    if DIALOGUE_LOG_PATH is None:
+    if DIALOGUE_LOG_PATH is None and CLEAN_DIALOGUE_LOG_PATH is None:
         return
     subject, obj, description, timestamp, keywords = event_tuple
     subject = subject or "system"
     obj = obj or "everyone"
     keyword_text = ", ".join(sorted(str(keyword) for keyword in keywords)) if keywords else ""
-    with open(DIALOGUE_LOG_PATH, "a") as outfile:
-        outfile.write(f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}")
-        if keyword_text:
-            outfile.write(f" | keywords={keyword_text}")
-        outfile.write("\n")
+    if DIALOGUE_LOG_PATH is not None:
+        with open(DIALOGUE_LOG_PATH, "a") as outfile:
+            outfile.write(f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}")
+            if keyword_text:
+                outfile.write(f" | keywords={keyword_text}")
+            outfile.write("\n")
+    if CLEAN_DIALOGUE_LOG_PATH is not None:
+        with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
+            outfile.write(f"[{timestamp}] EVENT ({table_name}): {description}\n")
 
 
 def write_dialogue_log(table_name, dialogue_tuple):
-    if DIALOGUE_LOG_PATH is None:
+    if DIALOGUE_LOG_PATH is None and CLEAN_DIALOGUE_LOG_PATH is None:
         return
     if len(dialogue_tuple) == 6:
         speaker, target, volume, line, timestamp, _keywords = dialogue_tuple
@@ -209,8 +292,12 @@ def write_dialogue_log(table_name, dialogue_tuple):
     else:
         speaker, target, volume, line, timestamp, audience, _keywords = dialogue_tuple
     audience_text = ", ".join(sorted(str(player) for player in audience)) if audience else "unknown"
-    with open(DIALOGUE_LOG_PATH, "a") as outfile:
-        outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}] audience=[{audience_text}]: {line}\n")
+    if DIALOGUE_LOG_PATH is not None:
+        with open(DIALOGUE_LOG_PATH, "a") as outfile:
+            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
+    if CLEAN_DIALOGUE_LOG_PATH is not None:
+        with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
+            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
 
 
 def debug_bid(persona, table, action, bid, reasoning):

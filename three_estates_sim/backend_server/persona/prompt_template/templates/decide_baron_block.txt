@@ -25,7 +25,7 @@ The revealed player is {revealed_player_name}, whose revealed role card is {reve
 As Baron, you may reveal your Baron card, block an ability if one is being attempted, and steal the revealed player's role card. If this was only a voluntary reveal, the reveal itself still stands, but you may still steal the revealed card.
 
 Decide whether using your Baron ability right now advances your position, prevents another player from gaining leverage, or creates too much risk for you.
-- There are {total_time_left} until the game ends entirely.
+- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
