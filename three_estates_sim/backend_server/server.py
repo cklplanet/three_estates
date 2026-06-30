@@ -2,6 +2,7 @@ from persona.persona import *
 from room import *
 from utils import *
 from persona.cognitive_modules.plan import *
+from persona.prompt_template.run_gpt_prompt import run_gpt_prompt_generate_vn_epilogue
 import datetime
 import random
 import itertools
@@ -35,26 +36,118 @@ class ThreeEstatesServer:
         self.server_sleep = 5
         self.session_id = None
         self.dialogue_log_path = None
+        self.clean_dialogue_log_path = None
         self.debug_log_path = None
 
-    def clear_table_locks(self, table, breaker_name):
+    def clear_table_locks(self, table, breaker_name, trigger):
         if not table.lockdown_targets:
             return
-        previous_benefactors = {(lock[0], lock[2]) for lock in table.lockdown_targets}
+        remaining_locks = set()
+        cleared_locks = set()
+        for benefactor, target, role in table.lockdown_targets:
+            should_clear = False
+            if trigger == "enter":
+                should_clear = role == "Innkeeper"
+            elif trigger == "leave":
+                if role == "Innkeeper":
+                    should_clear = breaker_name == benefactor
+                elif role == "Queen":
+                    should_clear = breaker_name == benefactor or breaker_name != target
+                elif role == "King":
+                    breaker_is_locked_by_this_king = breaker_name == target and breaker_name != benefactor
+                    should_clear = breaker_name == benefactor or not breaker_is_locked_by_this_king
+
+            if should_clear:
+                cleared_locks.add((benefactor, target, role))
+            else:
+                remaining_locks.add((benefactor, target, role))
+
+        if not cleared_locks:
+            return
+
+        previous_benefactors = {(lock[0], lock[2]) for lock in cleared_locks}
         for previous_benefactor, role in previous_benefactors:
-            if previous_benefactor in table.personas:
-                table.personas[previous_benefactor].scratch.ability_active = False
-                table.personas[previous_benefactor].scratch.ability_objects = []
-            act_desp = f"{previous_benefactor}'s lockdown ability as {role} is nullified by {breaker_name} leaving or entering"
+            if previous_benefactor in self.personas:
+                remaining_targets = [
+                    target for benefactor, target, lock_role in remaining_locks
+                    if benefactor == previous_benefactor and lock_role == role
+                ]
+                self.personas[previous_benefactor].scratch.ability_objects = remaining_targets
+                self.personas[previous_benefactor].scratch.ability_active = bool(remaining_targets)
+            act_desp = f"{previous_benefactor}'s lockdown ability as {role} is nullified by {breaker_name} {trigger}ing"
             nullify_event = (breaker_name, previous_benefactor, act_desp, self.curr_time, set([breaker_name, previous_benefactor]))
             table.add_table_event(nullify_event)
-        table.lockdown_targets = set()
+        table.lockdown_targets = remaining_locks
 
     def is_locked_at_table(self, table, persona_name):
         for benefactor, target, _role in table.lockdown_targets:
             if target == persona_name and benefactor != persona_name:
                 return True
         return False
+
+    def expire_table_timer_if_needed(self, table):
+        if table.timer_expired or self.curr_time < TIMERS[table.name]:
+            return
+        table.timer_expired = True
+        act_desp = f"The {table.name} timer expires; {table.name} is now locked down, and players there can no longer leave by normal movement."
+        timer_event = ("system", None, act_desp, self.curr_time, set([table.name] + list(table.personas.keys())))
+        table.add_table_event(timer_event)
+
+    def run_spinster_endgame_guess_round(self):
+        for table in self.room.locations.values():
+            for persona in list(table.personas.values()):
+                if persona.scratch.role != "Spinster":
+                    continue
+                required_targets = {name for name in table.personas if name != persona.scratch.name}
+                existing_guesses = set((persona.scratch.endgame_role_guesses or {}).keys())
+                if required_targets and required_targets.issubset(existing_guesses):
+                    continue
+                persona.make_spinster_endgame_guesses(table)
+        self.save_checkpoint("spinster_endgame_guess_complete")
+
+    def pre_spinster_results(self):
+        final_tables = final_table_map(self.room)
+        players = locations_to_player(final_tables)
+        results = {}
+        for name, player in players.items():
+            if player.scratch.role == "Spinster":
+                continue
+            results[name] = evaluate_base_win(name, player, final_tables)
+
+        adjusted_results = dict(results)
+        for _ in range(max(1, len(players))):
+            changed = False
+            next_results = dict(results)
+            for name, player in players.items():
+                if player.scratch.role in {"Nun", "Thief"}:
+                    next_results[name] = evaluate_base_win(name, player, final_tables, adjusted_results)
+            if next_results != results:
+                changed = True
+            results = next_results
+            adjusted_results = dict(results)
+            if not changed:
+                break
+        return results
+
+    def append_results_to_dialogue_log(self, title, results, pending_roles=None, flipped_by_spinster=None):
+        log_paths = [path for path in [self.dialogue_log_path, self.clean_dialogue_log_path] if path]
+        if not log_paths:
+            return
+        pending_roles = set(pending_roles or [])
+        flipped_by_spinster = flipped_by_spinster or []
+        for log_path in log_paths:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a") as outfile:
+                outfile.write(f"\n[{self.curr_time}] {title}\n")
+                for name, persona in sorted(self.personas.items()):
+                    if persona.scratch.role in pending_roles:
+                        outcome = "pending"
+                    else:
+                        outcome = "wins" if results.get(name, False) else "loses"
+                    outfile.write(f"- {name} ({persona.scratch.role}): {outcome}\n")
+                if flipped_by_spinster:
+                    outfile.write(f"Spinster reversal applied to: {', '.join(flipped_by_spinster)}\n")
+                outfile.write("\n")
 
     def sync_persona_to_table_history_end(self, persona, table_name):
         table = self.room.locations[table_name]
@@ -130,6 +223,7 @@ class ThreeEstatesServer:
             "session_id": self.session_id,
             "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
             "dialogue_log_path": str(self.dialogue_log_path) if self.dialogue_log_path else None,
+            "clean_dialogue_log_path": str(self.clean_dialogue_log_path) if self.clean_dialogue_log_path else None,
             "debug_log_path": str(self.debug_log_path) if self.debug_log_path else None,
         }
 
@@ -156,6 +250,7 @@ class ThreeEstatesServer:
             metadata = json.load(infile)
         self.session_id = metadata.get("session_id") or uuid.uuid4().hex[:12]
         self.dialogue_log_path = metadata.get("dialogue_log_path")
+        self.clean_dialogue_log_path = metadata.get("clean_dialogue_log_path")
         self.debug_log_path = metadata.get("debug_log_path")
         return metadata
 
@@ -261,6 +356,7 @@ class ThreeEstatesServer:
                 self.restore_table(table_name, table_state)
         for persona in self.personas.values():
             persona.scratch.curr_time = self.curr_time
+            persona.rebuild_recent_conversation_from_memory()
         print(f"Loaded checkpoint from: {self.session_state_path()}")
 
     def should_start_game_after_generation(self):
@@ -452,14 +548,93 @@ class ThreeEstatesServer:
         if not resume_existing or not self.dialogue_log_path:
             timestamp = datetime.datetime.now().strftime(RUN_LOG_TIME_FORMAT)
             self.dialogue_log_path = os.path.join(log_dir, f"dialogue_{self.session_id}_{timestamp}.log")
+        if not resume_existing or not self.clean_dialogue_log_path:
+            timestamp = datetime.datetime.now().strftime(RUN_LOG_TIME_FORMAT)
+            self.clean_dialogue_log_path = os.path.join(log_dir, f"dialogue_clean_{self.session_id}_{timestamp}.log")
         if not resume_existing or not self.debug_log_path:
             timestamp = datetime.datetime.now().strftime(RUN_LOG_TIME_FORMAT)
             self.debug_log_path = os.path.join(log_dir, f"debug_{self.session_id}_{timestamp}.log")
         set_dialogue_log_path(self.dialogue_log_path)
+        set_clean_dialogue_log_path(self.clean_dialogue_log_path)
         set_debug_log_path(self.debug_log_path)
         self.save_session_metadata()
         print(f"dialogue log: {self.dialogue_log_path}")
+        print(f"clean dialogue log: {self.clean_dialogue_log_path}")
         print(f"debug log: {self.debug_log_path}")
+
+    def epilogue_path(self):
+        log_dir = os.path.join(save_file, "dialogue_logs")
+        os.makedirs(log_dir, exist_ok=True)
+        if not self.session_id:
+            self.session_id = uuid.uuid4().hex[:12]
+        return os.path.join(log_dir, f"epilogue_{self.session_id}.txt")
+
+    def recent_log_excerpt(self, max_lines=None):
+        log_path = self.clean_dialogue_log_path or self.dialogue_log_path
+        if not log_path or not os.path.isfile(log_path):
+            return "No dialogue log excerpt is available."
+        with open(log_path) as infile:
+            lines = infile.readlines()
+        if max_lines is None:
+            max_lines = len(lines)
+        return "".join(lines[-max_lines:]).strip()
+
+    def build_epilogue_context(self, results):
+        table_lines = []
+        for table_name, table in self.room.locations.items():
+            table_lines.append(f"{table_name}:")
+            for name, persona in sorted(table.personas.items()):
+                outcome = "won" if results["final_results"].get(name) else "lost"
+                base_outcome = "won" if results["base_results"].get(name) else "lost"
+                held_cards = ", ".join(sorted(persona.scratch.cards_slot)) or "no cards"
+                guesses = ""
+                if persona.scratch.role == "Spinster":
+                    guesses = f"; Spinster guesses: {persona.scratch.endgame_role_guesses}"
+                table_lines.append(
+                    f"- {name}: role={persona.scratch.role}, family={role_family(persona.scratch.role)}, "
+                    f"final_result={outcome}, base_result={base_outcome}, held_cards={held_cards}{guesses}"
+                )
+        character_lines = []
+        for name, persona in sorted(self.personas.items()):
+            character_lines.append(f"{name}: {persona.scratch.get_str_iss()}")
+        flipped = ", ".join(results["flipped_by_spinster"]) if results["flipped_by_spinster"] else "none"
+        return (
+            f"Session id: {self.session_id}\n"
+            f"Final time: {self.curr_time}\n"
+            f"Spinster reversal flipped: {flipped}\n\n"
+            "Final table state, roles, cards, and results:\n"
+            + "\n".join(table_lines)
+            + "\n\nCharacter/personality notes:\n"
+            + "\n".join(character_lines)
+            + "\n\nRecent dialogue and event log excerpt:\n"
+            + self.recent_log_excerpt(max_lines=150)
+        )
+
+    def generate_and_save_vn_epilogue(self, results):
+        epilogue_path = self.epilogue_path()
+        if os.path.isfile(epilogue_path):
+            with open(epilogue_path) as infile:
+                epilogue = infile.read().strip()
+            print("\nPost-game VN epilogue:")
+            print(epilogue)
+            print(f"\nepilogue log: {epilogue_path}")
+            return epilogue
+
+        epilogue_context = self.build_epilogue_context(results)
+        epilogue = prompt_text(
+            run_gpt_prompt_generate_vn_epilogue(epilogue_context),
+            "*The room settles after the final bell, everyone too tired and too awake to leave just yet.*"
+        )
+        with open(epilogue_path, "w") as outfile:
+            outfile.write(epilogue.strip() + "\n")
+        if self.clean_dialogue_log_path:
+            with open(self.clean_dialogue_log_path, "a") as outfile:
+                outfile.write(f"\n[{self.curr_time}] POST-GAME VN EPILOGUE\n")
+                outfile.write(epilogue.strip() + "\n")
+        print("\nPost-game VN epilogue:")
+        print(epilogue)
+        print(f"\nepilogue log: {epilogue_path}")
+        return epilogue
 
 
 
@@ -489,6 +664,12 @@ class ThreeEstatesServer:
                 if resume_from_checkpoint:
                     self.load_checkpoint()
                 self.initialize_dialogue_log(resume_existing=resume_from_checkpoint)
+                if resume_from_checkpoint and debug:
+                    for persona in self.personas.values():
+                        debug_log(
+                            f"[RECENT-RESTORE] t={self.curr_time} | character={persona.scratch.name} | "
+                            f"recent_batches={len(persona.scratch.recent_conversation)}"
+                        )
             elif reused_existing_characters:
                 context_payload = self.load_character_context_payload()
                 character_group_context = context_payload.get("character_group_context", "")
@@ -500,6 +681,7 @@ class ThreeEstatesServer:
                 os.makedirs(save_file, exist_ok=True)
                 self.session_id = uuid.uuid4().hex[:12]
                 self.dialogue_log_path = None
+                self.clean_dialogue_log_path = None
                 self.debug_log_path = None
                 self.save_character_context(character_group_context, name_mode)
                 self.rebuild_clean_cast(cast, roles, reroll_roles=(session_mode == "reuse_reroll_roles"))
@@ -568,13 +750,14 @@ class ThreeEstatesServer:
                 print(f"{timedelta_to_natural(self.curr_time)} since the game started")
 
                 if self.curr_time >= TIMERS["Village"]:
+                    for table in self.room.locations.values():
+                        self.expire_table_timer_if_needed(table)
                     break
                 village_timer = TIMERS["Village"] - self.curr_time
                 print(f"{timedelta_to_natural(village_timer)} left until the game ends")
 
                 for table_name, table in self.room.locations.items():
-                    if self.curr_time >= TIMERS[table.name]:
-                        table.timer_expired = True
+                    self.expire_table_timer_if_needed(table)
 
                     table_bidding_results = dict()
                     to_remove = []
@@ -589,7 +772,7 @@ class ThreeEstatesServer:
                                 next_loc = decide_on_leaving(persona, table, retrieved_all_tables)
                                 if next_loc != "stay":
                                     persona.scratch.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
-                                    self.clear_table_locks(table, persona_name)
+                                    self.clear_table_locks(table, persona_name, "leave")
                                     to_remove.append((persona_name, next_loc))
                                     self.room.locations[next_loc].incoming_arrivals.add((persona_name, None, table_name))
                                 else:
@@ -657,6 +840,7 @@ class ThreeEstatesServer:
                         target_name = removal_target[1]
                         destination = removal_target[3]
                         target_persona = self.personas[target_name]
+                        self.clear_table_locks(table, target_name, "leave")
                         target_persona.scratch.curr_loc = destination
                         self.room.locations[destination].incoming_arrivals.add((target_name, removal_target[0], table_name))
                         if target_name in table.personas:
@@ -667,17 +851,27 @@ class ThreeEstatesServer:
                     queen_followups = []
                     for candidate, benefactor, source_table in table.incoming_arrivals:
                         if table.lockdown_targets:
-                            self.clear_table_locks(table, candidate)
+                            self.clear_table_locks(table, candidate, "enter")
                         self.sync_persona_to_table_history_end(self.personas[candidate], table_name)
                         table.personas[candidate] = self.personas[candidate]
                         act_desp = f"{candidate} arrives from {source_table}"
                         arrival_event = (candidate, None, act_desp, self.personas[candidate].scratch.curr_time, set([candidate]))
                         table.add_table_event(arrival_event)
-                        if self.personas[candidate].scratch.role == "Innkeeper" and self.personas[candidate].scratch.ability_active:
+                        arriving_persona = self.personas[candidate]
+                        if (
+                            table.name == "Village"
+                            and arriving_persona.scratch.role == "Innkeeper"
+                            and "Innkeeper" in arriving_persona.scratch.cards_slot
+                            and (
+                                arriving_persona.scratch.ability_active
+                                or arriving_persona.decide_innkeeper_declaration(table, source_table)
+                            )
+                        ):
+                            arriving_persona.scratch.ability_active = True
                             innkeeper = candidate
                         else:
                             special_circumstance = f"you're arriving at this table from {source_table}"
-                            self.personas[candidate].speak(table, special_circumstance)
+                            arriving_persona.speak(table, special_circumstance)
                         if benefactor:
                             queen_followups.append((benefactor, candidate))
                     for benefactor, candidate in queen_followups:
@@ -686,7 +880,7 @@ class ThreeEstatesServer:
                                 table.personas[benefactor].scratch.ability_objects.append(candidate)
                     if innkeeper:
                         innkeeper = self.personas[innkeeper]
-                        innkeeper_announcement = "you've just arrived here to lock everyone down and has to announce yourself to be Innkeeper to do so (without even having to show your card even though you DO have your card)"
+                        innkeeper_announcement = "you have just arrived here and are revealing your Innkeeper card to declare yourself as Innkeeper and lock down the Village"
                         innkeeper.speak(table, special_circumstance=innkeeper_announcement)
 
                         for other_player_name, other_player in table.personas.items():
@@ -694,7 +888,7 @@ class ThreeEstatesServer:
                                 if self.add_lock_if_allowed(table, innkeeper.scratch.name, other_player_name, innkeeper.scratch.role):
                                     innkeeper.scratch.ability_objects.append(other_player_name)
 
-                        act_desp = f"{innkeeper.scratch.name} self-declares as innkeeper and locks down everyone at the Village"
+                        act_desp = f"{innkeeper.scratch.name} reveals {innkeeper.role_card_text(role='Innkeeper')}, declares themself as Innkeeper, and locks down everyone at the Village"
                         lockdown_event = (innkeeper.scratch.name, None, act_desp, self.curr_time, set([innkeeper.scratch.name] + innkeeper.scratch.ability_objects))
                         table.add_table_event(lockdown_event)
 
@@ -711,14 +905,27 @@ class ThreeEstatesServer:
                     table.current_lines = []
                 self.save_checkpoint("timestep_complete")
 
+            self.append_results_to_dialogue_log(
+                "PRE-SPINSTER NET RESULTS",
+                self.pre_spinster_results(),
+                pending_roles={"Spinster"}
+            )
+            self.run_spinster_endgame_guess_round()
             results = resolve_endgame(self.room)
             print("Final results:")
             for player_name, won in sorted(results["final_results"].items()):
                 outcome = "wins" if won else "loses"
-                print(f"- {player_name}: {outcome}")
+                role = self.personas[player_name].scratch.role
+                print(f"- {player_name} ({role}): {outcome}")
             if results["flipped_by_spinster"]:
                 flipped = ", ".join(results["flipped_by_spinster"])
                 print(f"Spinster reversal applied to: {flipped}")
+            self.append_results_to_dialogue_log(
+                "FINAL RESULTS",
+                results["final_results"],
+                flipped_by_spinster=results["flipped_by_spinster"]
+            )
+            self.generate_and_save_vn_epilogue(results)
             self.save_checkpoint("game_end")
             time.sleep(self.server_sleep)
         except KeyboardInterrupt:

@@ -28,11 +28,10 @@ For this prompt in particular, you want to for now decide that, if simply talkin
   2: Revealing and proving it could shift how people treat me or believe me — especially useful if I want to bluff or signal alignment.
   3: There’s enough suspicion or pressure that revealing would change the table dynamic or help activate an ability chain.
   5: I must urgently reveal to disprove a false claim, secure an ability trigger, or publicly pivot perception to directly help my win condition; or someone else has asked for my reveal and it just happens to be in my advantage to comply right now. Any delay is dangerous.
-- There are {total_time_left} until the game ends entirely.
+- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
 - "reasoning": "string",  // How crucial is it for you to reveal your card and role right now? Explain in-character your reasoning in one or two sentences. Avoid using violent or harmful language.
 - "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "1" | "2" | "3" | "5" (numbers EXACTLY as shown, NOT continuous)
-

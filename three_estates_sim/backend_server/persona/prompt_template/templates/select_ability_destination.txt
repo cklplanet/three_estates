@@ -13,7 +13,7 @@ The conversations you have participated in so far for the last several minutes h
 {recent_conversation}
 
 Given that you now have to leave this table because {special_circumstance}, you must now move to either of the other two tables: {other_options}. Please decide which of the two you should leave for.
-There are {table_time_left} minutes until you can no longer leave this table, and {total_time_left} until the game ends entirely.
+There are {table_time_left} until you can no longer leave this table, and {total_time_left} until the game ends entirely.
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields below filled out with those exact format and fields and without the comments.
 

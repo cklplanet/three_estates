@@ -56,7 +56,7 @@ def ability_trigger(persona, table):
                 if persona.scratch.curr_loc == "Village":
                     trigger_message = "Since you're already at the Village, if you want to trigger your ability you must leave and come back again.\n"
                 else:
-                    trigger_message = "Since you're outside the Village, you have the option to return to the village to trigger your ability.\n"
+                    trigger_message = "Since you're outside the Village, you have the option to return to the village, reveal your Innkeeper card, and trigger your ability.\n"
             else:
                 ability_objects = ", ".join(persona.scratch.ability_objects)
                 trigger_message = f"Reminder that you're currently holding {ability_objects} hostage and if you leave for another table your lock on {ability_objects} will automatically break.\n"

@@ -15,13 +15,17 @@ The conversations you have participated in so far for the last several minutes h
 
 {ability_msg}
 
+There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+The table-specific leave timers are:
+{all_table_time_left}
+
 Given that {special_circumstance}, please decide exactly what you want to say IMMEDIATELY to accompany your move. Depending on what your personality is inclined towards, you may potentially, among other choices: 
 - Be neutral, analytical, or earnest
 - Be smug
 - Convey whatever immediate emotions you have, surprise, anger, dread, joy, etc
 - Be threatening or accusatory
 - Or be laconic and cryptic
-- Additionally, you can weaponize the fact that loud voices CAN be potentially heard by other tables (ONLY "practically screaming" volume can be heard by other tables; just "loud" is not enough)
+- Additionally, you can weaponize the fact that "practically screaming" voices CAN be potentially heard by other tables. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
@@ -30,4 +34,3 @@ return ONLY the json dict below (in proper python json format with brackets) wit
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
 - "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
 - "line": "string" // Your spoken accompanying line. Keep it moderately short in general.
-
