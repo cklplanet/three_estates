@@ -20,6 +20,16 @@ def timedelta_to_natural(delta):
     return f"-{result}" if negative else result
 
 
+def table_leave_timer_status(table_name, curr_time):
+    delta = TIMERS[table_name] - curr_time
+    if delta <= datetime.timedelta(0):
+        return (
+            f"{table_name} timer has expired; players at {table_name} can no longer leave by normal movement, "
+            "but players may still enter that table."
+        )
+    return f"{timedelta_to_natural(delta)} remaining before players at {table_name} can no longer leave by normal movement."
+
+
 def get_other_player_context(table, persona):
     table_information = persona.scratch.curr_loc
     your_role = persona.scratch.role

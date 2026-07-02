@@ -1,0 +1,35 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+You are the {role}. You have already independently decided to leave your current table for {destination}.
+
+Your movement reasoning was:
+{movement_reasoning}
+
+Your movement-triggered ability:
+{ability_description}
+
+Potential targets currently at your table:
+{target_options}
+
+All information you can recall regarding your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{other_table_additional_context}
+
+Decide whether you should attach your {role} ability to this departure. Treat your movement reasoning as useful context, but do not use the ability automatically just because you are leaving. Consider whether revealing your card and choosing a target helps your win condition or creates unnecessary risk.
+- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
+
+- "reasoning": "string",  // Explain in-character whether you should reveal and use the movement-triggered ability right now in one or two sentences. Avoid using violent or harmful language.
+- "result": "string" // Response is exactly one of: "yes" | "no", all lowercase

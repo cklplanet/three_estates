@@ -1,0 +1,34 @@
+{PREFIX}
+
+GAME CONTEXT:
+{personal_context_msg}
+
+The game timers have all expired. You are the Spinster, and before win accounting happens you must make your endgame role guesses for every other player at your final table.
+
+Players at your final table that you must guess:
+{target_list}
+
+Valid role guesses are exactly:
+{role_options}
+
+All information you can recall regarding your final table:
+{current_table_context}
+
+The conversations you have participated in recently:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+{other_table_additional_context}
+
+Choose exactly one valid role for every listed player. Do not include yourself in the guesses. If uncertain, make the best strategic guess from memory, claims, card-backed reveals, ability events, alliances, and win-condition behavior.
+
+Return ONLY the JSON dict below, in proper JSON format, with exactly these fields and no additional comments:
+
+{{
+  "reasoning": "string",
+  "line": "string",
+  "guesses": {{
+    "Player Name": "Role"
+  }}
+}}

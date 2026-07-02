@@ -351,8 +351,11 @@ class AssociativeMemory:
 
     ret = []
     for i in contents: 
-      if i in self.kw_to_thought: 
-        ret += self.kw_to_thought[i.lower()]
+      if not i:
+        continue
+      key = str(i).lower()
+      if key in self.kw_to_thought: 
+        ret += self.kw_to_thought[key]
 
     ret = set(ret)
     return ret
@@ -364,15 +367,19 @@ class AssociativeMemory:
 
     ret = []
     for i in contents: 
-      if i in self.kw_to_event: 
-        ret += self.kw_to_event[i]
+      if not i:
+        continue
+      key = str(i).lower()
+      if key in self.kw_to_event: 
+        ret += self.kw_to_event[key]
 
     ret = set(ret)
     return ret
 
 
   def get_last_chat(self, target_persona_name): 
-    if target_persona_name.lower() in self.kw_to_chat: 
-      return self.kw_to_chat[target_persona_name.lower()][0]
+    key = str(target_persona_name).lower()
+    if key in self.kw_to_chat: 
+      return self.kw_to_chat[key][0]
     else: 
       return False

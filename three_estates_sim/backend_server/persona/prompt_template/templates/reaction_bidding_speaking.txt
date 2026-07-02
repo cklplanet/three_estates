@@ -7,6 +7,8 @@ All information you can recall regarding to your current table:
 
 - {current_table_context}
 
+Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
+
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
@@ -28,12 +30,13 @@ For this prompt in particular, you want to for now decide how urgently you want 
   2: I have something critical and specific to contribute to this discussion, including fishing for information.
   3: It is absolutely urgent for me to speak next due to need for information (asking for soft or hard reveals, etc.), deflection, or dealing with my own or others' win conditions.
   4: Someone has addressed me directly and I must respond, either by speaking truthfully, lying, or attempting to rhetorically overpower. That or I just REALLY want to throw in a snarky comment.
-- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+- Current table leave timer status: {table_time_left}
+- There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
 {all_table_time_left}
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to speak right now? Explai in-character your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // How crucial is it for you to speak right now? Explain in-character (first-person) your reasoning in one or two sentences. Avoid using violent or harmful language.
 - "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "1" | "2" | "3" | "4"

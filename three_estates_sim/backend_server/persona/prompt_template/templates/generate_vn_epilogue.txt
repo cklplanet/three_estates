@@ -11,6 +11,6 @@ Format each line as either:
 - Character Name: character dialogue
 - *Third-person rumination, movement, internal narration, or room atmosphere*
 
-Tone: relatively literary but casual, like a late-night post-game room where people are decompressing, teasing each other, processing betrayals, joking, or drifting into unrelated conversation. It can discuss the game, the results, role reveals, mistaken reads, grudges, alliances, or literally anything else that feels natural after the game.
+Tone: relatively literary but casual (BUT can differ wildly in length etc depending on the actual characters present, if the character is fictional then make them as in-character as possible), like a late-night post-game room where people are decompressing, teasing each other, processing betrayals, joking, or drifting into unrelated conversation. It can discuss the game, the results, role reveals, mistaken reads, grudges, alliances, or literally anything else that feels natural after the game.
 
 Keep each line readable and not too long. Do not use JSON. Do not number the lines. Do not add headings. Do not explain the format.

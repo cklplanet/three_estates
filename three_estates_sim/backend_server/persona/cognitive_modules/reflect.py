@@ -111,7 +111,7 @@ def run_reflect(persona):
       keywords.add(role)
       keywords.add(role_data["family"])
   persona.a_mem.add_thought(created, expiration, persona.scratch.name, "board",
-                            thought, keywords, generate_poig_score(persona, "thought", thought),
+                            thought, keywords, 9,
                             thought_embedding_pair)
 
   my_nodes = [node for node in nodes if persona.scratch.name in node.keywords]

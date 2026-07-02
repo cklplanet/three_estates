@@ -3,9 +3,11 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-All information you can recall regarding to your current table:
+At this moment, all information you just happen to recall regarding to your current table are:
 
 - {current_table_context}
+
+Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
 
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
@@ -24,15 +26,25 @@ Given that {stay_at_table_reason}, and that you have now seized the chance to re
 - Bluff or lie about your or others' roles (like for example bullshitting about being the Innkeeper) or your own card availability and/or ability to use ability
 - React to others' actions or provocations
 - Or just be laconic and cryptic and throw everyone else at the table off
-- Optionally, you can weaponize the fact that "practically screaming" voices CAN be potentially heard by other tables in all of the ways above. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+- Optionally, you can weaponize the fact that voices at "practically screaming" - not just "loud" - volume CAN be potentially heard by other tables (and players transiting in between) in all of the ways above. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
 - Or completely ignore why you wanted to speak in the first place and instead say something completely random about yourself, the others, or some random topic
-- There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+- Current table leave timer status: {table_time_left}
+- There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
 {all_table_time_left}
+
+Natural speech discipline:
+- Say ONE thing, not a full strategic report.
+- By default, address one person or the table generally; do not accidentally answer every thread at once.
+- Addressing everyone, or naming several people one by one, is allowed when it is a deliberate strategy: calling the table to order, making a public accusation, forcing a comparison, rallying allies, or making a dramatic broadcast.
+- If you do address everyone or several people, still keep the line focused on one tactical purpose.
+- Let implications hang. You do not need to explain every reason, every suspicion, or every remembered fact.
+- If responding to several pressures, choose the most urgent one and ignore the rest for now.
+- Avoid recap language like "for the record", "to be clear", "let us compare", unless it strongly fits your character.
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" (output "everyone" exactly as is in this field in this case, all lowercase) or any other name (exactly as is including the capitalizations) at the table
 - "volume": "string", // one option from (exactly as is, all lowercase) "whisper" "calm" "loud" or "practically screaming"
-- "line": "string" // Your spoken response. Can go from extremely laconic to slightly detailed but keep it moderately short in general
+- "line": "string" // One natural spoken line. Usually one sentence; at most two short sentences. Multi-person or table-wide address is allowed when strategically intentional, but not as the default.

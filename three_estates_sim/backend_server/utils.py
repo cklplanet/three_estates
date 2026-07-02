@@ -19,9 +19,22 @@ def read_local_env_value(key):
     return None
 
 
+def read_int_config(key, default):
+    raw_value = os.getenv(key) or read_local_env_value(key)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except ValueError:
+        print(f"Invalid integer for {key}: {raw_value!r}; using {default}.")
+        return default
+
+
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER_KEY") or "YOUR_API_KEY_HERE"
 CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
+EPILOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_EPILOGUE_MODEL") or read_local_env_value("THREE_ESTATES_EPILOGUE_MODEL") or "openai/gpt-5.5"
+FALLBACK_LLM_MODEL = os.getenv("THREE_ESTATES_FALLBACK_MODEL") or read_local_env_value("THREE_ESTATES_FALLBACK_MODEL") or "openai/gpt-5.5"
 # Put your name
 key_owner = "<Name>"
 
@@ -39,9 +52,11 @@ collision_block_id = "32125"
 # Verbose 
 debug = True
 
-MOVEMENT_LEAVE_COOLDOWN_STEPS = 4
-MOVEMENT_STAY_COOLDOWN_STEPS = 2
-SPEAKING_COOLDOWN_STEPS = 1
+MOVEMENT_LEAVE_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_LEAVE_COOLDOWN_STEPS", 4)
+MOVEMENT_STAY_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_STAY_COOLDOWN_STEPS", 2)
+STARTING_MOVEMENT_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_STEPS", MOVEMENT_LEAVE_COOLDOWN_STEPS)
+STARTING_MOVEMENT_COOLDOWN_RADIUS = max(0, read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_RADIUS", 2))
+SPEAKING_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_SPEAKING_COOLDOWN_STEPS", 1)
 DIALOGUE_LOG_PATH = None
 CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
@@ -56,11 +71,29 @@ PREFIX = """You are playing a digital version of a turn-based **social deduction
 GAME RULES:
 - Roles belong to one of three **families**: Nobility, Commoners, Clergy. Each role has a **unique ability** and a **hidden win condition**.
 - The game takes place across **three timed locations (tables)**: Castle, Forest, and Village.
-- All players must be at one of the three tables at all times. Players may move between tables freely but can only leave a table if its timer is still active—unless affected by certain abilities.
+- All players must be at one of the three tables at all times (unless in transit). Players may move between tables freely but can only leave a table if its timer is still active—unless affected by certain abilities.
 - To activate an ability, a player must **reveal their card** and be holding it. Some abilities require conditions like being alone with another player.
 - Only one ability may be activated at a table at a time. Players may voluntarily reveal their role to others at their table at any time.
 - **Conversations are always public** at a table.
 - When the game ends (all table timers expire), players win if their **individual win condition** is satisfied—*unless reversed by the Spinster’s guess*.
+- Another player character's status, title, species, class, job, faction, or social role in their original source material (if applicable) is only flavor/context. It does NOT prove or imply their hidden game role or family here. You may make suspicions or jokes based on it, but you must treat the assigned game role/card as separate unless it has been revealed or otherwise learned in-game.
+
+ROLE RULEBOOK:
+Every role corresponds to only one player, and each player has only one of the possible roles below:
+- King, Nobility: may reveal the King card at a table and choose a family; matching players cannot leave until the King leaves or an unaffected player leaves. If choosing Nobility, the King remains free to move. Wins if at most one Commoner is in the Castle.
+- Queen, Nobility: when leaving a table, may reveal the Queen card and choose a player to follow to the new table; that player cannot leave until the Queen or someone else leaves that new table. Wins in Castle without King, or in Village with Priest.
+- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; after the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed.
+- Bishop, Clergy: after someone leaves the Bishop's table, may reveal the Bishop card and guess another player's family; if correct, that player must leave. Wins with no Nobility at the final table.
+- Priest, Clergy: when sitting with exactly one other player, may reveal the Priest card to see that player's role; fails if that player lacks their own role card. Wins if at most one person is in the Forest.
+- Farmer, Commoners: immune to other players' abilities except Nun card-giving and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
+- Thief, Commoners: when sitting with exactly one other player, may reveal the Thief card to swap roles/win conditions with them; fails if the target lacks their own role card. Wins if every other player in the Village loses.
+- Innkeeper, Commoners: upon entering the Village from elsewhere, may reveal the Innkeeper card and declare; if so, nobody can leave Village until someone else enters or the Innkeeper leaves. Wins with at least two Nobility at the final table.
+- Nun, Clergy: when sitting with exactly one other player, may give the Nun card to them; the holder is protected from other abilities and must return it if the Nun asks. Wins if at least three Commoners win.
+- Baron, Nobility: when another player reveals a card at a table with at least two other players, may reveal the Baron card to block an attempted ability and steal the revealed card; if it was only a reveal, the reveal stands but the Baron may still steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards. Spinster is immune to Baron's ability (but the Spinster-marked person isn't). Baron wins if holding at least three other players' cards.
+
+CARD RETRIEVAL RULES:
+- If the Baron stole your own role card, you keep your role and win condition but cannot use/reveal that card. You can reclaim it when and only when sitting alone with the Baron; the Baron must comply.
+- If the Nun gave you the Nun card, you are protected while holding it, cannot pass it onward, and must return it when the Nun asks (at any time).
 """
 
 
@@ -112,7 +145,7 @@ ROLE_DICT = {
     },
     "Baron": {
         "family": "Nobility",
-        "ability": "When a player reveals their card at a table with at least two other players, may block that ability and steal the card. The original player keeps their role but loses the ability until they sit with the Baron alone, which must be allowed.",
+        "ability": "When a player reveals their card at a table with at least two other players, may block that ability and steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards. The original player keeps their role but loses the ability until they sit with the Baron alone, which must be allowed.",
         "win_condition": "Wins if holding at least three other cards at game end."
     }
 }
@@ -120,6 +153,10 @@ ROLE_DICT = {
 TIMERS = {"Castle": datetime.timedelta(minutes=6),
           "Forest": datetime.timedelta(minutes=7),
           "Village": datetime.timedelta(minutes=8)}
+
+
+def game_end_time():
+    return max(TIMERS.values())
 
 
 def heuristic_poignancy_score(persona, event_type, description, subject=None, obj=None, keywords=None):
@@ -138,16 +175,6 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     if "is idle" in lower:
         return 1
 
-    if persona_name:
-        persona_lower = persona_name.lower()
-        direct_participants = {subject_text, object_text}
-        directly_named = persona_lower in lower
-        directly_involved = persona_name in direct_participants
-        if event_type != "chat" and persona_name in keywords:
-            directly_involved = True
-        if directly_involved or directly_named:
-            return 10
-
     high_proof_patterns = [
         r"\breveals?\b.*\bcard\b",
         r"\battempts? to use\b",
@@ -160,15 +187,28 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
         r"\bretrieves?\b.*\bcard\b",
         r"\bgives?\b.*\bcard\b",
     ]
-    if any(re.search(pattern, lower) for pattern in high_proof_patterns):
-        return 7
-
     movement_patterns = [
         r"\bleaves for\b",
         r"\barrives from\b",
     ]
-    if any(re.search(pattern, lower) for pattern in movement_patterns):
+    is_movement = any(re.search(pattern, lower) for pattern in movement_patterns)
+    has_proof_or_ability = any(re.search(pattern, lower) for pattern in high_proof_patterns)
+
+    if is_movement and not has_proof_or_ability:
         return 1
+
+    if persona_name:
+        persona_lower = persona_name.lower()
+        direct_participants = {subject_text, object_text}
+        directly_named = persona_lower in lower
+        directly_involved = persona_name in direct_participants
+        if event_type != "chat" and persona_name in keywords:
+            directly_involved = True
+        if directly_involved or directly_named:
+            return 10
+
+    if has_proof_or_ability:
+        return 7
 
     roles_and_families = set(ROLE_DICT.keys()) | {"nobility", "noble", "commoner", "commoners", "clergy"}
     role_pattern = "|".join(re.escape(term.lower()) for term in sorted(roles_and_families, key=len, reverse=True))
@@ -216,6 +256,14 @@ def prompt_text(prompt_result, default):
     if isinstance(payload, str) and payload.strip():
         return payload.strip()
     return default
+
+
+def compact_summary_text(value, fallback="", max_chars=240):
+    text = " ".join(str(value or fallback or "").split())
+    if len(text) <= max_chars:
+        return text
+    trimmed = text[:max_chars].rsplit(" ", 1)[0].rstrip(".,;: ")
+    return f"{trimmed}."
 
 
 def bounded_int(value, default, allowed=None, minimum=None, maximum=None):
@@ -313,16 +361,17 @@ def debug_bid(persona, table, action, bid, reasoning):
     )
 
 
-def debug_movement(persona, table, requested_option, final_option, reasoning):
+def debug_movement(persona, table, requested_option, final_option, reasoning, summary=None):
     if not debug:
         return
     adjusted = ""
     if requested_option != final_option:
         adjusted = f" | adjusted_from={requested_option}"
+    summary_text = f" | summary={summary}" if summary else ""
     debug_log(
         f"[MOVE-DECISION] t={persona.scratch.curr_time} | table={table.name} | "
         f"character={persona.scratch.name} | role={persona.scratch.role} | "
-        f"option={final_option}{adjusted} | movement_cooldown={persona.scratch.movement_cooldown} | "
+        f"option={final_option}{adjusted} | movement_cooldown={persona.scratch.movement_cooldown}{summary_text} | "
         f"reasoning={reasoning}"
     )
 

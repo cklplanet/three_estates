@@ -23,7 +23,7 @@ class Scratch:
     # <att_bandwidth>
     self.att_bandwidth = 3
     # <retention>
-    self.retention = 20
+    self.retention = 10
 
     # WORLD INFORMATION
     # Perceived world time. 
@@ -54,6 +54,9 @@ class Scratch:
     # RELEVANT TO OUR GAME
     self.role = role #"King", "Queen", "Spinster", etc.
     self.current_bidding_scores = dict()
+    self.current_bidding_reasonings = dict()
+    self.current_movement_reasoning = None
+    self.current_movement_destination = None
     self.cards_slot = {role} # has your own card by default. also "King", "Queen", "Spinster", etc.
     self.recent_conversation = [] # format: [{time(xxx): events([node, node, node])}, ....]
     #self.current_table_conversation = [] #limited to just the current table, for reflection only
@@ -65,7 +68,7 @@ class Scratch:
     self.act_reasoning = None
     self.relationships = dict()
     self.group_context = None
-    self.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
+    self.movement_cooldown = STARTING_MOVEMENT_COOLDOWN_STEPS
     self.speaking_cooldown = 0
     self.dialogue_cursors = dict()
     self.overheard_dialogue_cursors = dict()
@@ -101,6 +104,9 @@ class Scratch:
 
         self.role = scratch_load.get("role", self.role)
         self.current_bidding_scores = scratch_load["current_bidding_scores"]
+        self.current_bidding_reasonings = scratch_load.get("current_bidding_reasonings", self.current_bidding_reasonings)
+        self.current_movement_reasoning = scratch_load.get("current_movement_reasoning", self.current_movement_reasoning)
+        self.current_movement_destination = scratch_load.get("current_movement_destination", self.current_movement_destination)
         if "cards_slot" in scratch_load:
           self.cards_slot = set(scratch_load["cards_slot"])
         else:
@@ -143,6 +149,9 @@ class Scratch:
     scratch["importance_trigger_curr"] = self.importance_trigger_curr
     scratch["role"] = self.role
     scratch["current_bidding_scores"] = self.current_bidding_scores
+    scratch["current_bidding_reasonings"] = self.current_bidding_reasonings
+    scratch["current_movement_reasoning"] = self.current_movement_reasoning
+    scratch["current_movement_destination"] = self.current_movement_destination
     scratch["cards_slot"] = list(self.cards_slot)
     scratch["recent_conversation"] = []
     scratch["win_progress"] = self.win_progress

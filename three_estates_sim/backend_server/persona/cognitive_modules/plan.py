@@ -67,8 +67,21 @@ def bid(persona, table):
   table_size = len(table.personas.keys())
   role = persona.scratch.role
   persona.scratch.current_bidding_scores = dict()
+  persona.scratch.current_bidding_reasonings = dict()
   # Default ability bid is 0 (not usable)
   ability_bid = 0
+  retrieve_bid = 0
+  retrieval_options = persona.card_retrieval_options(table)
+  if retrieval_options:
+    retrieve_bid_dict = prompt_dict(
+      run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options),
+      {"reasoning": "I will not spend the table's attention retrieving a card right now.", "bid": "0"}
+    )
+    persona.scratch.act_reasoning = retrieve_bid_dict["reasoning"]
+    persona.scratch.current_bidding_reasonings['retrieve'] = retrieve_bid_dict["reasoning"]
+    retrieve_bid = bounded_int(retrieve_bid_dict["bid"], 0, allowed={0, 3, 8})
+    persona.scratch.current_bidding_scores['retrieve'] = retrieve_bid
+    debug_bid(persona, table, "retrieve", retrieve_bid, retrieve_bid_dict["reasoning"])
   # Check conditions for ability being allowed
   if role in persona.scratch.cards_slot:
     if (
@@ -89,6 +102,7 @@ def bid(persona, table):
           {"reasoning": "I do not have a clear ability play right now.", "bid": "0"}
         )
         persona.scratch.act_reasoning = ability_bid_dict["reasoning"]
+        persona.scratch.current_bidding_reasonings['ability'] = ability_bid_dict["reasoning"]
         ability_bid = bounded_int(ability_bid_dict["bid"], 0, allowed={0, 1, 3, 5, 7})
         ability_bid = ABILITY_MULTIPLIER * ability_bid
         persona.scratch.current_bidding_scores['ability'] = ability_bid
@@ -104,6 +118,7 @@ def bid(persona, table):
       {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
     )
   persona.scratch.act_reasoning = reveal_bid_dict["reasoning"]
+  persona.scratch.current_bidding_reasonings['reveal'] = reveal_bid_dict["reasoning"]
   reveal_bid = bounded_int(reveal_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 5})
   debug_bid(persona, table, "reveal", REVEAL_MULTIPLIER * reveal_bid, reveal_bid_dict["reasoning"])
   if persona.scratch.speaking_cooldown > 0:
@@ -117,13 +132,14 @@ def bid(persona, table):
       {"reasoning": "I have nothing useful to add out loud right now.", "bid": "0"}
     )
   persona.scratch.act_reasoning = speaking_bid_dict["reasoning"]
+  persona.scratch.current_bidding_reasonings['speak'] = speaking_bid_dict["reasoning"]
   speaking_bid = bounded_int(speaking_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 4})
   #print("reveal bid: ", reveal_bid_dict)
   #print("speaking bid: ", speaking_bid_dict)
   reveal_bid = REVEAL_MULTIPLIER * reveal_bid
   speaking_bid = SPEAK_MULTIPLIER * speaking_bid
   debug_bid(persona, table, "speak", speaking_bid, speaking_bid_dict["reasoning"])
-  total_bid_score = ability_bid + reveal_bid + speaking_bid
+  total_bid_score = ability_bid + reveal_bid + speaking_bid + retrieve_bid
   persona.scratch.current_bidding_scores['reveal'] = reveal_bid
   persona.scratch.current_bidding_scores['speak'] = speaking_bid
   return total_bid_score
@@ -132,12 +148,20 @@ def bid(persona, table):
 def decide_on_leaving(persona, table, retrieved_all_tables):
   movement_dict = prompt_dict(
     run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables),
-    {"reasoning": "I do not have a strong reason to leave right now.", "option": "stay"}
+    {
+      "reasoning": "I do not have a strong reason to leave right now.",
+      "summary": "Stay for now and keep watching the table.",
+      "option": "stay"
+    }
   )
   requested_option = movement_dict["option"]
   option = requested_option
   if option not in table.connected and option != "stay":
     option = "stay"
-  debug_movement(persona, table, requested_option, option, movement_dict["reasoning"])
-  remember_movement_reasoning(persona, table, requested_option, option, movement_dict["reasoning"])
+  full_reasoning = movement_dict["reasoning"]
+  summary = compact_summary_text(movement_dict.get("summary"), full_reasoning)
+  persona.scratch.current_movement_reasoning = summary
+  persona.scratch.current_movement_destination = option
+  debug_movement(persona, table, requested_option, option, full_reasoning, summary)
+  remember_movement_reasoning(persona, table, requested_option, option, summary)
   return option
