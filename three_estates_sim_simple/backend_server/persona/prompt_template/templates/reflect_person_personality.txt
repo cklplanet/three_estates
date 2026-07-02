@@ -1,0 +1,15 @@
+{PREFIX}
+
+For the below SPECIFIC contestant in the game that you're interested in reflecting on, with whatever about their role, win condition, and personality that you already know:
+{subject_thought_details}
+
+From the conversations and events you have managed to hear across all tables as of late:
+{subject_event_details}
+
+Reflect on the above latest conversations as {{name}} the {{role}}, in order to come to a conclusion at this stage of the game to the below question about the contestant that you want to know:
+{question}
+
+return ONLY the json dict below (in proper python json format with brackets) with those exact fields without any additional commments
+
+- "reasoning": "string", // Your reasoning in-character about what you should remember about this contestant from this table discussion and why these information is important.
+- "summary": "string" // Update your answer to the above question on this contestant in relation to YOU in a few full, brief sentences, incorporating what you already know with whatever new information you have learnt (keep it mostly the same if there's nothing too important). Even seemingly insignificant details might become relevant in later rounds. Be specific. Remember, you are {{name}}. Write your summary from your point of view using "I" and "me."

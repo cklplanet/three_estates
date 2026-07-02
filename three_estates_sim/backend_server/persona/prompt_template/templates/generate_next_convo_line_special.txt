@@ -3,9 +3,11 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-All information you can recall regarding to your current table:
+At this moment, all information you just happen to recall regarding to your current table are:
 
 - {current_table_context}
+
+Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
 
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
@@ -15,7 +17,8 @@ The conversations you have participated in so far for the last several minutes h
 
 {ability_msg}
 
-There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+Current table leave timer status: {table_time_left}
+There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
 {all_table_time_left}
 
@@ -25,12 +28,20 @@ Given that {special_circumstance}, please decide exactly what you want to say IM
 - Convey whatever immediate emotions you have, surprise, anger, dread, joy, etc
 - Be threatening or accusatory
 - Or be laconic and cryptic
-- Additionally, you can weaponize the fact that "practically screaming" voices CAN be potentially heard by other tables. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+- Additionally, you can weaponize the fact that voices at "practically screaming" - not just "loud" - volume CAN be potentially heard by other tables (and players transiting in between). Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+
+Natural action-line discipline:
+- This is an accompanying line, not a speech.
+- Normally keep it punchy: one sentence is ideal, two short sentences maximum.
+- Do not address more than one named person unless the action directly involves multiple people; or you're directly making a last-minute verbal strategy to the table.
+- Do not summarize the whole table state.
+- Say what someone would plausibly say while moving, revealing, reacting, or being pressured (or in case of arriving at a table, any announcements you may or may not want to make).
+- Emotion, implication, and subtext are better than explanation.
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Avoid using violent or harmful language.
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
 - "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
-- "line": "string" // Your spoken accompanying line. Keep it moderately short in general.
+- "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences.

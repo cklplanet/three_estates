@@ -18,7 +18,8 @@ The conversations you have participated in so far for the last several minutes h
 {ability_msg}
 
 Given that {stay_at_table_reason}, please assess the current situation and decide whether or not you want to retrieve your card. 
-There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
+Current table leave timer status: {table_time_left}
+There are {total_time_left} until the game ends entirely.
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.

@@ -13,6 +13,13 @@ from persona.prompt_template.gpt_structure import *
 from numpy import dot
 from numpy.linalg import norm
 
+def strictly_past_nodes(persona, nodes):
+    return [
+        node for node in nodes
+        if node.created is not None and node.created < persona.scratch.curr_time
+    ]
+
+
 def retrieve(persona, room, self_table_perceived, other_tables_perceived): 
     retrieved_self = dict()
     retrieved_others = dict()
@@ -33,8 +40,14 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
         retrieved_self[event.description] = dict()
         retrieved_self[event.description]["curr_event"] = event
 
-        relevant_events = persona.a_mem.retrieve_relevant_events(event.subject, event.object)
-        relevant_thoughts = persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+        relevant_events = strictly_past_nodes(
+            persona,
+            persona.a_mem.retrieve_relevant_events(event.subject, event.object)
+        )
+        relevant_thoughts = strictly_past_nodes(
+            persona,
+            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+        )
 
         retrieved_self[event.description]["events"] = list(relevant_events)
         retrieved_self[event.description]["thoughts"] = list(relevant_thoughts)
@@ -50,14 +63,20 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
         retrieved_others[event.description] = dict()
         retrieved_others[event.description]["curr_event"] = event
 
-        relevant_events = persona.a_mem.retrieve_relevant_events(event.subject, event.object)
-        relevant_thoughts = persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+        relevant_events = strictly_past_nodes(
+            persona,
+            persona.a_mem.retrieve_relevant_events(event.subject, event.object)
+        )
+        relevant_thoughts = strictly_past_nodes(
+            persona,
+            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+        )
 
         retrieved_others[event.description]["events"] = list(relevant_events)
         retrieved_others[event.description]["thoughts"] = list(relevant_thoughts)
 
         if event.type == "chat":
-            new_chat = new_retrieve(persona, [event.description], 3)
+            new_chat = new_retrieve(persona, [event.description], 4)
             event_list = next(iter(new_chat.values()))
             new_chat_dict = {(f"(From table {event.table}) " + event.description): event_list}
             other_retrieved_lines_related.update(new_chat_dict)
@@ -73,12 +92,12 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
             relevant_events = set()
             relevant_events.update(persona.a_mem.retrieve_relevant_events(persona_name, None))
             relevant_events.update(persona.a_mem.retrieve_relevant_events(None, persona_name))
-            retrieved_all_tables[table_name][persona_name]["events"] += list(relevant_events)
+            retrieved_all_tables[table_name][persona_name]["events"] += strictly_past_nodes(persona, relevant_events)
 
             relevant_thoughts = set()
             relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(persona_name, None))
             relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(None, persona_name))
-            retrieved_all_tables[table_name][persona_name]["thoughts"] += list(relevant_thoughts)
+            retrieved_all_tables[table_name][persona_name]["thoughts"] += strictly_past_nodes(persona, relevant_thoughts)
     #retrieved_self format: {description: {"curr_event": event node, "events": list of event nodes, "thoughts": list of event nodes}}
     #retrieved_lines_related: {line_content: list of event nodes, line_2_content: list of event nodes, etc.}
     #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
@@ -130,6 +149,8 @@ def normalize_dict_floats(d, target_min, target_max):
     target_min = -5
     target_max = 5
   """
+  if not d:
+    return d
   min_val = min(val for val in d.values())
   max_val = max(val for val in d.values())
   range_val = max_val - min_val
@@ -263,7 +284,9 @@ def new_retrieve(persona, focal_points, n_count=30):
     # You could also imagine getting the raw conversation, but for now. 
     nodes = [[i.last_accessed, i]
               for i in persona.a_mem.seq_event + persona.a_mem.seq_thought + persona.a_mem.seq_chat
-              if "idle" not in i.embedding_key]
+              if "idle" not in i.embedding_key
+              and i.created is not None
+              and i.created < persona.scratch.curr_time]
     nodes = sorted(nodes, key=lambda x: x[0])
     nodes = [i for created, i in nodes]
 
