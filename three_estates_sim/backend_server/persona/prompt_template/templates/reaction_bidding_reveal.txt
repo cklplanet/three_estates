@@ -15,13 +15,14 @@ The conversations you have participated in so far for the last several minutes h
 
 {other_table_additional_context}
 
-Given that {stay_at_table_reason}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
+Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
 - Speak (truthfully, misleadingly, strategically, or just casually)
 - Reveal your card
 - React to others' actions or provocations
 {ability_msg}
 
 For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, how urgently you want to reveal (WITHOUT even using your ability) your card and role to everyone at your current table in particular. For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first.
+Important: this regular reveal bid is only for revealing your own actual role card. It does NOT include showing a Nun card that is protecting you; that is a separate nun-reveal action if available.
 - BID OPTIONS:
   0: Either: I will not reveal my card. No benefit, and it may backfire or make me a target. Or: I have already revealed my card to the same people at the table and there haven't been anyone new coming in the meantime yet.
   1: I’m slightly open to revealing if prompted or if it builds light trust, but there’s no real gain yet. I would rather converse normally to gauge the situation.

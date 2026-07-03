@@ -17,8 +17,8 @@ The conversations you have participated in so far for the last several minutes h
 
 {other_table_additional_context}
 
-Given that {stay_at_table_reason}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
-- Speak truthfully, misleadingly (for example claiming you or others are of a certain role/family without revealing your card and proving it), strategically, or just casually
+Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
+- Speak truthfully, misleadingly (for example claiming you or others are of a certain role/family without revealing your card and proving it, same goes for claiming you're protected by Nun without proving), strategically, questioningly (esp about others' claims), or just casually
 - Reveal your card
 - React to others' actions or provocations
 {ability_msg}

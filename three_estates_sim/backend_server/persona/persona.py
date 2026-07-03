@@ -217,7 +217,7 @@ class Persona:
     retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = self.retrieve(room, self_table_perceived, other_tables_perceived)
     self.scratch.retrieved = (retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables)
 
-  def speak(self, table, special_circumstance=None):
+  def speak(self, table, special_circumstance=None, consume_cooldown=True):
     self.update_knowledge(self.room)
     default_line = {
       "object": "everyone",
@@ -233,7 +233,8 @@ class Persona:
     if speak_dict["volume"] not in {"whisper", "calm", "loud", "practically screaming"}:
       speak_dict["volume"] = "calm"
     table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
-    self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
+    if consume_cooldown:
+      self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
 
   def select_ability_target(self, table, ability_reasoning=""):
     possible_targets = list(set(table.personas.keys()) - {self.scratch.name})
@@ -251,6 +252,46 @@ class Persona:
       run_gpt_prompt_guess_family_bishop(self, target, table),
       {"reasoning": "I have to make my best guess from limited evidence.", "guess": "Commoners"}
     )
+
+  def respond_to_wrong_bishop_guess(self, bishop, guessed_family, table):
+    default_response = {
+      "reasoning": "I will not give the table a verified reveal just because the Bishop guessed wrong.",
+      "response": "no reveal",
+      "object": bishop.scratch.name,
+      "volume": "calm",
+      "line": "Wrong, but I am not handing you proof for free.",
+    }
+    response_dict = prompt_dict(
+      run_gpt_prompt_bishop_wrong_guess_response(self, bishop, guessed_family, table),
+      default_response
+    )
+    response = str(response_dict.get("response", "no reveal")).strip().lower()
+    if response not in {"hard reveal", "soft reveal", "no reveal"}:
+      response = "no reveal"
+    if response == "hard reveal" and self.scratch.role not in self.scratch.cards_slot:
+      response = "no reveal"
+      response_dict["line"] = "That guess is wrong, but I cannot prove it with a card right now."
+    obj = response_dict.get("object", "everyone")
+    if obj not in table.personas and obj != "everyone":
+      obj = "everyone"
+    volume = response_dict.get("volume", "calm")
+    if volume not in {"whisper", "calm", "loud", "practically screaming"}:
+      volume = "calm"
+    line = response_dict.get("line", "That guess is wrong.")
+    table.add_table_dialogue((self.scratch.name, obj, volume, line, self.scratch.curr_time, set([self.scratch.name, obj])))
+    self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
+    debug_log(
+      f"[BISHOP-WRONG-RESPONSE] t={self.scratch.curr_time} | table={table.name} | "
+      f"bishop={bishop.scratch.name} | target={self.scratch.name} | guessed_family={guessed_family} | "
+      f"response={response} | reasoning={response_dict.get('reasoning', '')}"
+    )
+    if response == "hard reveal":
+      act_desp = (
+        f"{self.scratch.name} reveals {self.role_card_text()} to prove "
+        f"the Bishop {bishop.scratch.name}'s guess of {guessed_family} was wrong"
+      )
+      table.add_table_event((self.scratch.name, bishop.scratch.name, act_desp, self.scratch.curr_time, set([self.scratch.name, bishop.scratch.name])))
+      self.resolve_baron_reaction(table, self.scratch.name, act_desp, block_ability=False)
 
   def card_retrieval_options(self, table):
     options = []
@@ -296,8 +337,10 @@ class Persona:
     )
     return result == "yes"
 
-  def decide_movement_ability_use(self, table, destination):
-    movement_reasoning = self.scratch.current_movement_reasoning or ""
+  def decide_movement_ability_use(self, table, destination, movement_reasoning_override=None):
+    movement_reasoning = movement_reasoning_override
+    if movement_reasoning is None:
+      movement_reasoning = self.scratch.current_movement_reasoning or ""
     decision = prompt_dict(
       run_gpt_prompt_decide_movement_ability_use(self, table, destination, movement_reasoning),
       {"reasoning": "I will leave without revealing my movement-triggered ability right now.", "result": "no"}
@@ -330,6 +373,10 @@ class Persona:
 
     should_use, ability_reasoning = self.decide_movement_ability_use(table, destination)
     if not should_use:
+      normal_record["speech_constraint"] = (
+        f"you explicitly chose not to reveal/use your {role} ability for this departure; "
+        "do not say or imply that anyone is forced to follow you"
+      )
       return [normal_record]
 
     target_name = self.select_ability_target(table, ability_reasoning)
@@ -346,7 +393,8 @@ class Persona:
         table,
         f"you had already decided to leave for {destination} because {movement_reasoning}; "
         f"now you are revealing your Queen card and trying to make {target_name} follow you. "
-        f"Your ability-use reasoning was: {ability_reasoning}"
+        f"Your ability-use reasoning was: {ability_reasoning}",
+        consume_cooldown=False,
       )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
       if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
@@ -357,7 +405,8 @@ class Persona:
       target = table.personas[target_name]
       target.speak(
         table,
-        f"the Queen has just activated {poss} ability after deciding to leave for {destination}, chose you as the target, and is about to drag you there, as parting words,"
+        f"the Queen has just activated {poss} ability after deciding to leave for {destination}, chose you as the target, and is about to drag you there, as parting words,",
+        consume_cooldown=False,
       )
       event_msg = (
         f"{self.scratch.name} reveals {self.role_card_text(role='Queen')} and leaves for {destination} "
@@ -378,7 +427,8 @@ class Persona:
         table,
         f"you had already decided to leave the Forest for {destination} because {movement_reasoning}; "
         f"now you are revealing your Spinster card and marking {target_name}. "
-        f"Your ability-use reasoning was: {ability_reasoning}"
+        f"Your ability-use reasoning was: {ability_reasoning}",
+        consume_cooldown=False,
       )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
@@ -417,7 +467,8 @@ class Persona:
       special_circumstance = (
         f"the departing Spinster {self.scratch.name} has forced you to reveal your Farmer card. "
         "You are normally immune to other players' abilities, but in this oddly useless edge case "
-        "the card reveal is also how you prove you are Farmer, so lampshade that the proof still has to happen. "
+        "the card reveal is also how you prove you are Farmer, so lampshade that the proof still has to happen "
+        "and do not describe this as immunity preventing the reveal. "
         "The Baron cannot block the Spinster forcing this reveal, but a Baron may still react to the card you reveal afterward"
       )
     else:
@@ -513,12 +564,35 @@ class Persona:
   def act(self, table):
     _, _, _, _, retrieved_all_tables = self.scratch.retrieved
     act_scores = self.scratch.current_bidding_scores
-    act_scores = [(option, points) for option, points in sorted(act_scores.items(), key=lambda item: item[1], reverse=True)]
+    action_tie_break_priority = {
+      "retrieve": 4,
+      "speak": 3,
+      "ability": 2,
+      "nun-reveal": 1,
+      "reveal": -1,
+    }
+    act_scores = [
+      (option, points)
+      for option, points in sorted(
+        act_scores.items(),
+        key=lambda item: (item[1], action_tie_break_priority.get(item[0], -2)),
+        reverse=True,
+      )
+    ]
     final_option = act_scores[0][0]
     obj = "her" if self.scratch.gender == "female" else "him"
     subj = "she" if self.scratch.gender == "female" else "he"
     poss = self.possessive_for()
     action_role = self.scratch.role
+
+    def with_winning_act_reasoning(special_circumstance, action_kind):
+      act_reasoning = (self.scratch.current_bidding_reasonings or {}).get(action_kind)
+      if not act_reasoning:
+        return special_circumstance
+      return (
+        f"{special_circumstance}. When you won the internal bid for this {action_kind} action, "
+        f"your reasoning was: {act_reasoning}"
+      )
 
     def with_optional_speaking_reasoning(special_circumstance):
       speak_reasoning = (self.scratch.current_bidding_reasonings or {}).get("speak")
@@ -549,7 +623,16 @@ class Persona:
           if not self.maybe_stay_silent(table, "they cannot activate the Innkeeper ability while already in the Village"):
             self.speak(table)
           return
-        self.speak(table, with_optional_speaking_reasoning("you have decided to leave for the Village, where you may reveal your Innkeeper card and declare on arrival; say what you want this table to hear before you depart, but whether you reveal (without proving) Innkeeper or not before leaving is up to you"))
+        self.speak(
+          table,
+          with_optional_speaking_reasoning(
+            with_winning_act_reasoning(
+              "you have decided to leave for the Village, where you may reveal your Innkeeper card and declare on arrival; say what you want this table to hear before you depart. You are not revealing or proving your Innkeeper card at this departure table",
+              "ability",
+            )
+          ),
+          consume_cooldown=False,
+        )
         table.removal_targets.add((None, self.scratch.name, action_role, "Village"))
         self.scratch.ability_active = True
         act_desp = f"{self.scratch.name} leaves for Village."
@@ -571,7 +654,15 @@ class Persona:
         target_name = self.select_ability_target(table, (self.scratch.current_bidding_reasonings or {}).get("ability", ""))
 
       ability_attempt_context = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} and attempts to use {poss} {action_role} ability on {target_name}."
-      self.speak(table, with_optional_speaking_reasoning(f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; say what you want the table to hear before the ability resolves"))
+      self.speak(
+        table,
+        with_optional_speaking_reasoning(
+          with_winning_act_reasoning(
+            f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; say what you want the table to hear before the ability resolves",
+            "ability",
+          )
+        )
+      )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
       if action_role != "Spinster" and self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
         return
@@ -607,6 +698,17 @@ class Persona:
         table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
         return
 
+      if target.scratch.role == "Farmer" and action_role == "Priest":
+        special_circumstance = (
+          f"the Priest {self.scratch.name} is using {poss} ability on you and technically forces you to reveal your Farmer card. "
+          "You are normally immune to other players' abilities, but the only way to prove that you are Farmer is to reveal the Farmer card, "
+          "so lampshade the awkward paradox and do not describe this as immunity preventing the reveal"
+        )
+        target.speak(table, special_circumstance)
+        act_desp = f"the Priest {self.scratch.name} forces {target_name} to reveal {self.role_card_text(target, 'Farmer')}"
+        table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
+        return
+
       if target.scratch.role == "Farmer":
         special_circumstance = f"the {action_role} {self.scratch.name} is trying to use {poss} ability on you and you have to reveal your Farmer card to prove you're immune,"
         act_desp = f"{target_name} reveals {self.role_card_text(target, 'Farmer')}"
@@ -632,8 +734,7 @@ class Persona:
           target.scratch.cards_slot.discard(target_old_role)
           target.scratch.cards_slot.add(old_role)
           target.scratch.role = old_role
-          self.scratch.movement_cooldown = max(self.scratch.movement_cooldown, 1)
-          target.scratch.movement_cooldown = max(target.scratch.movement_cooldown, 1)
+          self.scratch.movement_cooldown = 0
           act_desp = f"{self.scratch.name} reveals {self.role_card_text(role=old_role)} and forcefully swaps cards with {target_name}. {target_name} is the Thief now while {self.scratch.name} is now {self.scratch.role}"
           table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
@@ -644,7 +745,7 @@ class Persona:
         table.removal_targets.add((None, self.scratch.name, action_role, next_loc))
         table.removal_targets.add((self.scratch.name, target_name, action_role, next_loc))
         special_circumstance = f"the Queen has just activated {poss} ability, chose you as the target, and are about to drag you to depart to the {next_loc}, as parting words,"
-        target.speak(table, special_circumstance)
+        target.speak(table, special_circumstance, consume_cooldown=False)
         event_msg = f"{self.scratch.name} reveals {self.role_card_text(role='Queen')} and leaves for {next_loc} while dragging {target_name} with {obj} using {poss} ability."
         table.add_table_event((self.scratch.name, target_name, event_msg, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
@@ -669,13 +770,16 @@ class Persona:
         guess = self.guess_family_bishop(target, table)["guess"]
         special_circumstance = f"you, as Bishop, have just made an internal guess that {target_name}'s family is {guess}, which you now want to annnounce to the target and to the table"
         if guess != ROLE_DICT[target.scratch.role]["family"]:
-          special_circumstance = f"you have just been guessed by the Bishop {self.scratch.name} as family {guess}, which is wrong"
-          target.speak(table, special_circumstance)
+          target.respond_to_wrong_bishop_guess(self, guess, table)
         else:
-          next_loc = self.select_ability_destination(table, retrieved_all_tables, special_circumstance)
+          target_choice_context = (
+            f"the Bishop {self.scratch.name} correctly guessed your family as {guess}; "
+            "you, the target of the Bishop ability, must choose which other table to leave for"
+          )
+          next_loc = target.select_ability_destination(table, retrieved_all_tables, target_choice_context)
           special_circumstance = f"you have just been correctly guessed by the Bishop {self.scratch.name} as family {guess} and now have to leave for {next_loc}"
           table.removal_targets.add((self.scratch.name, target_name, action_role, next_loc))
-          target.speak(table, special_circumstance)
+          target.speak(table, special_circumstance, consume_cooldown=False)
           act_desp = f"the Bishop {self.scratch.name} correctly guesses {target_name}'s family as {guess} and the latter has to leave for {next_loc}"
           table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
@@ -686,10 +790,35 @@ class Persona:
         if not self.maybe_stay_silent(table, "they cannot prove their role card right now"):
           self.speak(table, f"you want to reveal your {action_role} card, but you cannot prove it because you do not currently have your role card")
         return
-      self.speak(table, with_optional_speaking_reasoning(f"you are revealing your {action_role} card without using your ability; say what you want the table to hear as/accompanying this reveal"))
+      self.speak(
+        table,
+        with_optional_speaking_reasoning(
+          with_winning_act_reasoning(
+            f"you are revealing your {action_role} card without using your ability; say what you want the table to hear as/accompanying this reveal",
+            "reveal",
+          )
+        )
+      )
       act_desp = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} without using {poss} ability"
       table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
       self.resolve_baron_reaction(table, self.scratch.name, act_desp, block_ability=False)
+
+    elif final_option == "nun-reveal":
+      if not (self.scratch.role != "Nun" and self.scratch.nun_protected and "Nun" in self.scratch.cards_slot):
+        act_desp = f"{self.scratch.name} tries to show the Nun card protecting {obj}, but cannot produce it."
+        table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name, "Nun"])))
+        return
+      self.speak(
+        table,
+        with_optional_speaking_reasoning(
+          with_winning_act_reasoning(
+            "you are showing the Nun card currently protecting you. This proves you are protected by the Nun card, but it does NOT reveal or prove your actual private role card",
+            "nun-reveal",
+          )
+        )
+      )
+      act_desp = f"{self.scratch.name} reveals the Nun card protecting {obj}, without revealing {poss} actual role card"
+      table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name, "Nun"])))
 
     elif final_option == "retrieve":
       retrieval_options = self.card_retrieval_options(table)
@@ -698,13 +827,14 @@ class Persona:
         table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
         return
       target_name = retrieval_options[0]["target"]
-      self.retrieve_card(table, target_name, ask=False, kind=retrieval_options[0]["kind"])
+      retrieval_reasoning = (self.scratch.current_bidding_reasonings or {}).get("retrieve", "")
+      self.retrieve_card(table, target_name, ask=False, kind=retrieval_options[0]["kind"], action_reasoning=retrieval_reasoning)
 
     else:
       self.speak(table)
 
   
-  def retrieve_card(self, table, object, ask=True, kind=None):
+  def retrieve_card(self, table, object, ask=True, kind=None, action_reasoning=""):
     poss = "her" if self.scratch.gender == "female" else "his"
     if kind is None:
       kind = "nun" if (
@@ -728,6 +858,10 @@ class Persona:
     else:
       attempt_desp = f"{self.scratch.name} asks the Baron {object} to return {poss} {card_name} card."
       request_circumstance = f"you are demanding your {card_name} card back from the Baron {object} because the Baron is alone with you now"
+    if action_reasoning:
+      request_circumstance += (
+        f". When you won the internal bid for this retrieve action, your reasoning was: {action_reasoning}"
+      )
 
     self.speak(table, request_circumstance)
     table.add_table_event((self.scratch.name, object, attempt_desp, self.scratch.curr_time, set([self.scratch.name, object, card_name])))
@@ -790,7 +924,8 @@ class Persona:
     personal_context_msg = self.scratch.get_str_iss()
     for relationship_name, relationship in self.scratch.relationships.items():
       personal_context_msg += f"Your relationship with {relationship_name}: {relationship}\n"
-    personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\nYour own {your_role} card is currently {own_card_status}. You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.\n"
+    nun_protection_status = " You are currently protected by the Nun card.\n" if self.scratch.nun_protected else "\n"
+    personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\nYour own {your_role} card is currently {own_card_status}. You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.{nun_protection_status}"
     return personal_context_msg
 
   

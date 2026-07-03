@@ -116,8 +116,10 @@ def perceive(persona, room):
   for other_table in other_tables:
     other_location = room.locations[other_table]
     overheard_cursor = persona.scratch.overheard_dialogue_cursors.get(other_table, 0)
-    overheard_dialogue = other_location.dialogue_history[overheard_cursor:]
-    persona.scratch.overheard_dialogue_cursors[other_table] = len(other_location.dialogue_history)
+    audible_limit = getattr(room, "audible_dialogue_limits", {}).get(other_table, len(other_location.dialogue_history))
+    audible_limit = min(audible_limit, len(other_location.dialogue_history))
+    overheard_dialogue = other_location.dialogue_history[overheard_cursor:audible_limit]
+    persona.scratch.overheard_dialogue_cursors[other_table] = audible_limit
     for utterance in overheard_dialogue:
       s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
       if volume == "practically screaming":

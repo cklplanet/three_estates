@@ -37,6 +37,14 @@ class Location:
         return f"<Location: {self.name} | Connected: {list(self.connected)} | Contents: {self.contents}>"
     
     def add_table_event(self, event_tuple):
+        subject, obj, description, timestamp, keywords = event_tuple
+        keywords = set(keywords or []) | role_keywords_from_text(description)
+        for player_name in list(keywords) + [subject, obj]:
+            if player_name in self.personas:
+                role = self.personas[player_name].scratch.role
+                keywords.add(role)
+                keywords.add(role_family(role))
+        event_tuple = (subject, obj, description, timestamp, keywords)
         self.current_events.append(event_tuple)
         self.event_history.append(event_tuple)
         write_table_event_log(self.name, event_tuple)
@@ -48,6 +56,14 @@ class Location:
             audience = set(self.personas.keys())
             keywords = set(keywords) | audience
             dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
+        speaker, target, volume, line, timestamp, audience, keywords = dialogue_tuple
+        keywords = set(keywords or []) | role_keywords_from_text(line)
+        for player_name in set(audience or []) | {speaker, target}:
+            if player_name in self.personas:
+                role = self.personas[player_name].scratch.role
+                keywords.add(role)
+                keywords.add(role_family(role))
+        dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
         self.current_lines.append(dialogue_tuple)
         self.dialogue_history.append(dialogue_tuple)
         write_dialogue_log(self.name, dialogue_tuple)
@@ -58,6 +74,8 @@ class RoomGraph:
     def __init__(self, personas):
         self.locations = dict()
         self.personas = personas
+        self.transit = dict()  # persona_name -> {source, destination, benefactor, since}
+        self.audible_dialogue_limits = dict()
         edges = [
             ("Forest", "Castle"),
             ("Castle", "Village"),

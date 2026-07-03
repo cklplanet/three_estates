@@ -14,8 +14,47 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 import json
 import datetime
 import os
+import difflib
+import re
 
 from global_methods import *
+
+FUZZY_KEYWORD_MATCH_THRESHOLD = 0.86
+
+KEYWORD_ALIASES = {
+  "commoner": {"commoner", "commoners"},
+  "commoners": {"commoner", "commoners"},
+  "noble": {"noble", "nobles", "nobility"},
+  "nobles": {"noble", "nobles", "nobility"},
+  "nobility": {"noble", "nobles", "nobility"},
+  "clergy": {"clergy", "cleric", "clerics"},
+  "cleric": {"clergy", "cleric", "clerics"},
+  "clerics": {"clergy", "cleric", "clerics"},
+}
+
+
+def normalize_keyword(keyword):
+  key = str(keyword or "").lower().strip()
+  key = re.sub(r"\s+", " ", key)
+  key = re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", key)
+  if key.endswith("'s"):
+    key = key[:-2]
+  if len(key) > 4 and key.endswith("ies"):
+    key = key[:-3] + "y"
+  elif len(key) > 4 and key.endswith("es") and not key.endswith("ses"):
+    key = key[:-2]
+  elif len(key) > 3 and key.endswith("s") and not key.endswith("ss"):
+    key = key[:-1]
+  return key
+
+
+def keyword_variants(keyword):
+  raw = str(keyword or "").lower().strip()
+  normalized = normalize_keyword(raw)
+  variants = {raw, normalized}
+  variants.update(KEYWORD_ALIASES.get(raw, set()))
+  variants.update(KEYWORD_ALIASES.get(normalized, set()))
+  return {variant for variant in variants if variant}
 
 
 class ConceptNode: 
@@ -148,6 +187,47 @@ class AssociativeMemory:
     return datetime.timedelta(0)
 
 
+  def index_node_keywords(self, keyword_index, keywords, node):
+    for keyword in keywords:
+      for kw in keyword_variants(keyword):
+        if kw in keyword_index:
+          keyword_index[kw][0:0] = [node]
+        else:
+          keyword_index[kw] = [node]
+
+
+  def matching_keyword_keys(self, keyword_index, keyword):
+    keys = set()
+    for variant in keyword_variants(keyword):
+      if variant in keyword_index:
+        keys.add(variant)
+      if len(variant) >= 4:
+        close_matches = difflib.get_close_matches(
+          variant,
+          keyword_index.keys(),
+          n=8,
+          cutoff=FUZZY_KEYWORD_MATCH_THRESHOLD,
+        )
+        keys.update(close_matches)
+    return keys
+
+
+  def retrieve_from_keyword_index(self, keyword_index, contents):
+    ret = []
+    for content in contents:
+      if not content:
+        continue
+      for key in self.matching_keyword_keys(keyword_index, content):
+        ret += keyword_index[key]
+
+    ret_by_id = {node.node_id: node for node in ret}
+    return sorted(
+      ret_by_id.values(),
+      key=lambda node: (node.created, node.node_count),
+      reverse=True
+    )
+
+
   def embedding_to_json(self, value):
     if hasattr(value, "tolist"):
       return value.tolist()
@@ -221,12 +301,7 @@ class AssociativeMemory:
 
     # Creating various dictionary cache for fast access. 
     self.seq_event[0:0] = [node]
-    keywords = [i.lower() for i in keywords]
-    for kw in keywords: 
-      if kw in self.kw_to_event: # aka there is already a list
-        self.kw_to_event[kw][0:0] = [node]
-      else: 
-        self.kw_to_event[kw] = [node]
+    self.index_node_keywords(self.kw_to_event, keywords, node)
     self.id_to_node[node_id] = node 
 
     # I have no clue what this does, needs double check
@@ -262,12 +337,7 @@ class AssociativeMemory:
 
     # Creating various dictionary cache for fast access. 
     self.seq_thought[0:0] = [node]
-    keywords = [i.lower() for i in keywords]
-    for kw in keywords: 
-      if kw in self.kw_to_thought: 
-        self.kw_to_thought[kw][0:0] = [node]
-      else: 
-        self.kw_to_thought[kw] = [node]
+    self.index_node_keywords(self.kw_to_thought, keywords, node)
     self.id_to_node[node_id] = node 
 
     # I have no clue what this does either
@@ -301,12 +371,7 @@ class AssociativeMemory:
 
     # Creating various dictionary cache for fast access. 
     self.seq_chat[0:0] = [node]
-    keywords = [i.lower() for i in keywords]
-    for kw in keywords: 
-      if kw in self.kw_to_chat: 
-        self.kw_to_chat[kw][0:0] = [node]
-      else: 
-        self.kw_to_chat[kw] = [node]
+    self.index_node_keywords(self.kw_to_chat, keywords, node)
     self.id_to_node[node_id] = node 
 
     self.embeddings[embedding_pair[0]] = embedding_pair[1]
@@ -347,39 +412,22 @@ class AssociativeMemory:
 
   def retrieve_relevant_thoughts(self, s_content, o_content): 
     # "relevant" in this sense means containing the same keywords the query does
-    contents = [s_content, o_content]
-
-    ret = []
-    for i in contents: 
-      if not i:
-        continue
-      key = str(i).lower()
-      if key in self.kw_to_thought: 
-        ret += self.kw_to_thought[key]
-
-    ret = set(ret)
-    return ret
+    return self.retrieve_from_keyword_index(self.kw_to_thought, [s_content, o_content])
 
 
   def retrieve_relevant_events(self, s_content, o_content): 
     # "relevant" in this sense means containing the same keywords the query does
-    contents = [s_content, o_content]
-
-    ret = []
-    for i in contents: 
-      if not i:
-        continue
-      key = str(i).lower()
-      if key in self.kw_to_event: 
-        ret += self.kw_to_event[key]
-
-    ret = set(ret)
-    return ret
+    return self.retrieve_from_keyword_index(self.kw_to_event, [s_content, o_content])
 
 
   def get_last_chat(self, target_persona_name): 
-    key = str(target_persona_name).lower()
-    if key in self.kw_to_chat: 
-      return self.kw_to_chat[key][0]
-    else: 
+    matched_nodes = []
+    for key in self.matching_keyword_keys(self.kw_to_chat, target_persona_name):
+      matched_nodes += self.kw_to_chat[key]
+    if not matched_nodes:
       return False
+    return sorted(
+      {node.node_id: node for node in matched_nodes}.values(),
+      key=lambda node: (node.created, node.node_count),
+      reverse=True,
+    )[0]

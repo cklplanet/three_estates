@@ -71,13 +71,13 @@ def bid(persona, table):
   # Default ability bid is 0 (not usable)
   ability_bid = 0
   retrieve_bid = 0
+  nun_reveal_bid = 0
   retrieval_options = persona.card_retrieval_options(table)
   if retrieval_options:
     retrieve_bid_dict = prompt_dict(
       run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options),
       {"reasoning": "I will not spend the table's attention retrieving a card right now.", "bid": "0"}
     )
-    persona.scratch.act_reasoning = retrieve_bid_dict["reasoning"]
     persona.scratch.current_bidding_reasonings['retrieve'] = retrieve_bid_dict["reasoning"]
     retrieve_bid = bounded_int(retrieve_bid_dict["bid"], 0, allowed={0, 3, 8})
     persona.scratch.current_bidding_scores['retrieve'] = retrieve_bid
@@ -101,12 +101,20 @@ def bid(persona, table):
           run_gpt_prompt_act_bidding_ability(persona, table),
           {"reasoning": "I do not have a clear ability play right now.", "bid": "0"}
         )
-        persona.scratch.act_reasoning = ability_bid_dict["reasoning"]
         persona.scratch.current_bidding_reasonings['ability'] = ability_bid_dict["reasoning"]
         ability_bid = bounded_int(ability_bid_dict["bid"], 0, allowed={0, 1, 3, 5, 7})
         ability_bid = ABILITY_MULTIPLIER * ability_bid
         persona.scratch.current_bidding_scores['ability'] = ability_bid
         debug_bid(persona, table, "ability", ability_bid, ability_bid_dict["reasoning"])
+  if role != "Nun" and persona.scratch.nun_protected and "Nun" in persona.scratch.cards_slot:
+    nun_reveal_bid_dict = prompt_dict(
+      run_gpt_prompt_act_bidding_nun_reveal(persona, table),
+      {"reasoning": "I do not need to show the Nun card protecting me right now.", "bid": "0"}
+    )
+    persona.scratch.current_bidding_reasonings['nun-reveal'] = nun_reveal_bid_dict["reasoning"]
+    nun_reveal_bid = bounded_int(nun_reveal_bid_dict["bid"], 0, allowed={0, 1, 3, 5})
+    persona.scratch.current_bidding_scores['nun-reveal'] = nun_reveal_bid
+    debug_bid(persona, table, "nun-reveal", nun_reveal_bid, nun_reveal_bid_dict["reasoning"])
   if role not in persona.scratch.cards_slot:
     reveal_bid_dict = {
       "reasoning": f"I cannot reveal my {role} card because I do not currently have it.",
@@ -117,7 +125,6 @@ def bid(persona, table):
       run_gpt_prompt_act_bidding_reveal(persona, table),
       {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
     )
-  persona.scratch.act_reasoning = reveal_bid_dict["reasoning"]
   persona.scratch.current_bidding_reasonings['reveal'] = reveal_bid_dict["reasoning"]
   reveal_bid = bounded_int(reveal_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 5})
   debug_bid(persona, table, "reveal", REVEAL_MULTIPLIER * reveal_bid, reveal_bid_dict["reasoning"])
@@ -131,7 +138,6 @@ def bid(persona, table):
       run_gpt_prompt_act_bidding_speak(persona, table),
       {"reasoning": "I have nothing useful to add out loud right now.", "bid": "0"}
     )
-  persona.scratch.act_reasoning = speaking_bid_dict["reasoning"]
   persona.scratch.current_bidding_reasonings['speak'] = speaking_bid_dict["reasoning"]
   speaking_bid = bounded_int(speaking_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 4})
   #print("reveal bid: ", reveal_bid_dict)
@@ -139,9 +145,28 @@ def bid(persona, table):
   reveal_bid = REVEAL_MULTIPLIER * reveal_bid
   speaking_bid = SPEAK_MULTIPLIER * speaking_bid
   debug_bid(persona, table, "speak", speaking_bid, speaking_bid_dict["reasoning"])
-  total_bid_score = ability_bid + reveal_bid + speaking_bid + retrieve_bid
+  total_bid_score = ability_bid + reveal_bid + speaking_bid + retrieve_bid + nun_reveal_bid
   persona.scratch.current_bidding_scores['reveal'] = reveal_bid
   persona.scratch.current_bidding_scores['speak'] = speaking_bid
+  if persona.scratch.current_bidding_scores:
+    tie_break_priority = {
+      "retrieve": 4,
+      "speak": 3,
+      "ability": 2,
+      "nun-reveal": 1,
+      "reveal": -1,
+    }
+    strongest_action = max(
+      persona.scratch.current_bidding_scores,
+      key=lambda action: (
+        persona.scratch.current_bidding_scores[action],
+        tie_break_priority.get(action, -1),
+      ),
+    )
+    persona.scratch.act_reasoning = persona.scratch.current_bidding_reasonings.get(
+      strongest_action,
+      persona.scratch.act_reasoning,
+    )
   return total_bid_score
 
 
