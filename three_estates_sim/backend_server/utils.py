@@ -2,7 +2,7 @@ import datetime
 import os
 import re
 from pathlib import Path
-from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT
+from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT, SESSIONS_ROOT
 
 def read_local_env_value(key):
     for env_path in (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env"):
@@ -45,7 +45,14 @@ env_visuals = maze_assets_loc / "the_ville" / "visuals"
 fs_storage = FRONTEND_SERVER_ROOT / "storage"
 fs_temp_storage = FRONTEND_SERVER_ROOT / "temp_storage"
 
-save_file = DEFAULT_SESSION_DIR
+SESSION_NAME = os.getenv("THREE_ESTATES_SESSION_NAME") or read_local_env_value("THREE_ESTATES_SESSION_NAME")
+SESSION_DIR = os.getenv("THREE_ESTATES_SESSION_DIR") or read_local_env_value("THREE_ESTATES_SESSION_DIR")
+if SESSION_DIR:
+    save_file = Path(SESSION_DIR).expanduser()
+elif SESSION_NAME:
+    save_file = SESSIONS_ROOT / SESSION_NAME
+else:
+    save_file = DEFAULT_SESSION_DIR
 
 collision_block_id = "32125"
 
@@ -57,9 +64,20 @@ MOVEMENT_STAY_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_STAY_COOL
 STARTING_MOVEMENT_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_STEPS", MOVEMENT_LEAVE_COOLDOWN_STEPS)
 STARTING_MOVEMENT_COOLDOWN_RADIUS = max(0, read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_RADIUS", 2))
 SPEAKING_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_SPEAKING_COOLDOWN_STEPS", 1)
+SCRATCH_IMPORTANCE_TRIGGER_MAX = read_int_config("THREE_ESTATES_IMPORTANCE_TRIGGER_MAX", 150)
+SCRATCH_RETENTION_BATCHES = read_int_config("THREE_ESTATES_RETENTION_BATCHES", 15)
+SCRATCH_ATTENTION_BANDWIDTH = read_int_config("THREE_ESTATES_ATTENTION_BANDWIDTH", 3)
+MIN_ACTION_BID_SCORE = read_int_config("THREE_ESTATES_MIN_ACTION_BID_SCORE", 2)
+SIM_SECONDS_PER_STEP = read_int_config(
+    "THREE_ESTATES_SECONDS_PER_PHASE",
+    read_int_config("THREE_ESTATES_SECONDS_PER_STEP", 10)
+)
+SERVER_SLEEP_SECONDS = read_int_config("THREE_ESTATES_SERVER_SLEEP_SECONDS", 5)
 DIALOGUE_LOG_PATH = None
 CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
+TABLE_LOG_DIR = None
+CHARACTER_LOG_DIR = None
 
 
 class FatalLLMError(RuntimeError):
@@ -82,10 +100,10 @@ ROLE RULEBOOK:
 Every role corresponds to only one player, and each player has only one of the possible roles below:
 - King, Nobility: may reveal the King card at a table and choose a family; matching players cannot leave until the King leaves or an unaffected player leaves. If choosing Nobility, the King remains free to move. Wins if at most one Commoner is in the Castle.
 - Queen, Nobility: when leaving a table, may reveal the Queen card and choose a player to follow to the new table; that player cannot leave until the Queen or someone else leaves that new table. Wins in Castle without King, or in Village with Priest.
-- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; after the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed.
+- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; immune to Baron's block and steal while doing so due to technically being no longer present. After the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed (that is, if you're losing then after the flip you would win instead, do consider how close you are to your own win condition before deciding if the Spinster is a threat or ally).
 - Bishop, Clergy: after someone leaves the Bishop's table, may reveal the Bishop card and guess another player's family; if correct, that player must leave. Wins with no Nobility at the final table.
 - Priest, Clergy: when sitting with exactly one other player, may reveal the Priest card to see that player's role; fails if that player lacks their own role card. Wins if at most one person is in the Forest.
-- Farmer, Commoners: immune to other players' abilities except Nun card-giving and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
+- Farmer, Commoners: immune to other players' abilities (including Baron) except Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
 - Thief, Commoners: when sitting with exactly one other player, may reveal the Thief card to swap roles/win conditions with them; fails if the target lacks their own role card. Wins if every other player in the Village loses.
 - Innkeeper, Commoners: upon entering the Village from elsewhere, may reveal the Innkeeper card and declare; if so, nobody can leave Village until someone else enters or the Innkeeper leaves. Wins with at least two Nobility at the final table.
 - Nun, Clergy: when sitting with exactly one other player, may give the Nun card to them; the holder is protected from other abilities and must return it if the Nun asks. Wins if at least three Commoners win.
@@ -110,7 +128,7 @@ ROLE_DICT = {
     },
     "Spinster": {
         "family": "Commoners",
-        "ability": "When leaving the Forest, can choose to point to a player there. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
+        "ability": "When leaving the Forest, can choose to point to a player there; immune to Baron's block and steal while doing so due to being no longer present. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
         "win_condition": "If all other players at the Spinster's final table at game end are guessed correctly. In the event of this the win conditions of all other players' at said table are reversed."
     },
     "Bishop": {
@@ -125,7 +143,7 @@ ROLE_DICT = {
     },
     "Farmer": {
         "family": "Commoners",
-        "ability": "Is immune to other players’ abilities, except for the Nun’s card-giving and the Spinster’s endgame reversal.",
+        "ability": "Is immune to other players’ abilities (including the Baron), except for the Nun’s card-giving, directly forced reveal from Spinster and Priest (because to prove immunity or not you have to reveal you're the Farmer anyway), and the Spinster’s endgame reversal.",
         "win_condition": "Wins if sitting with at least two clergy members at game end."
     },
     "Thief": {
@@ -173,6 +191,15 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     object_text = str(obj or "")
 
     if "is idle" in lower:
+        return 1
+    if (
+        subject_text.lower() == "system"
+        and (
+            "the table falls quiet" in lower
+            or "no action bid was strong enough" in lower
+            or "everyone is still waiting for space to speak" in lower
+        )
+    ):
         return 1
 
     high_proof_patterns = [
@@ -280,12 +307,14 @@ def bounded_int(value, default, allowed=None, minimum=None, maximum=None):
     return parsed
 
 
-def set_dialogue_log_path(path):
+def set_dialogue_log_path(path, log_dir=None):
     global DIALOGUE_LOG_PATH
     DIALOGUE_LOG_PATH = Path(path)
     DIALOGUE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(DIALOGUE_LOG_PATH, "a") as outfile:
         outfile.write(f"# Three Estates table log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
+    if log_dir:
+        set_advanced_log_dirs(Path(log_dir))
 
 
 def set_clean_dialogue_log_path(path):
@@ -301,6 +330,54 @@ def set_debug_log_path(path):
     DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(DEBUG_LOG_PATH, "a") as outfile:
         outfile.write(f"# Three Estates debug log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
+
+
+def set_advanced_log_dirs(log_dir):
+    global TABLE_LOG_DIR, CHARACTER_LOG_DIR
+    TABLE_LOG_DIR = Path(log_dir) / "tables"
+    CHARACTER_LOG_DIR = Path(log_dir) / "characters"
+    TABLE_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    CHARACTER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def safe_log_filename(name):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_") or "unknown"
+
+
+def append_table_specific_log(table_name, line):
+    if TABLE_LOG_DIR is None:
+        return
+    with open(TABLE_LOG_DIR / f"{safe_log_filename(table_name)}.log", "a") as outfile:
+        outfile.write(line + "\n")
+
+
+def append_all_table_specific_logs(line, exclude_table=None):
+    if TABLE_LOG_DIR is None:
+        return
+    for table_log in sorted(TABLE_LOG_DIR.glob("*.log")):
+        if exclude_table and table_log.stem == safe_log_filename(exclude_table):
+            continue
+        with open(table_log, "a") as outfile:
+            outfile.write(line + "\n")
+
+
+def append_character_specific_log(characters, line):
+    if CHARACTER_LOG_DIR is None:
+        return
+    for character in sorted(str(c) for c in characters if c and c != "everyone" and c != "system"):
+        with open(CHARACTER_LOG_DIR / f"{safe_log_filename(character)}.log", "a") as outfile:
+            outfile.write(line + "\n")
+
+
+def append_all_character_specific_logs(line, exclude_characters=None):
+    if CHARACTER_LOG_DIR is None:
+        return
+    exclude_names = {safe_log_filename(character) for character in (exclude_characters or [])}
+    for character_log in sorted(CHARACTER_LOG_DIR.glob("*.log")):
+        if character_log.stem in exclude_names:
+            continue
+        with open(character_log, "a") as outfile:
+            outfile.write(line + "\n")
 
 
 def debug_log(message):
@@ -326,6 +403,11 @@ def write_table_event_log(table_name, event_tuple):
             if keyword_text:
                 outfile.write(f" | keywords={keyword_text}")
             outfile.write("\n")
+    advanced_line = f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}"
+    if keyword_text:
+        advanced_line += f" | keywords={keyword_text}"
+    append_table_specific_log(table_name, advanced_line)
+    append_character_specific_log(set(keywords or []) | {subject, obj}, advanced_line)
     if CLEAN_DIALOGUE_LOG_PATH is not None:
         with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
             outfile.write(f"[{timestamp}] EVENT ({table_name}): {description}\n")
@@ -343,6 +425,16 @@ def write_dialogue_log(table_name, dialogue_tuple):
     if DIALOGUE_LOG_PATH is not None:
         with open(DIALOGUE_LOG_PATH, "a") as outfile:
             outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
+    advanced_line = f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]"
+    append_table_specific_log(table_name, advanced_line)
+    append_character_specific_log(set(audience or []) | {speaker, target}, advanced_line)
+    if volume == "practically screaming":
+        overheard_line = (
+            f"[{timestamp}] DIALOGUE (overheard from {table_name}) {speaker} -> {target} "
+            f"[{volume}]: {line} | audience=[{audience_text}]"
+        )
+        append_all_table_specific_logs(overheard_line, exclude_table=table_name)
+        append_all_character_specific_logs(overheard_line, exclude_characters=set(audience or []) | {speaker, target})
     if CLEAN_DIALOGUE_LOG_PATH is not None:
         with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
             outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
@@ -388,6 +480,19 @@ def debug_perception(persona, table_name, self_count, other_count):
 
 def role_family(role):
     return ROLE_DICT[role]["family"]
+
+
+def role_keywords_from_text(text):
+    lower = str(text or "").lower()
+    keywords = set()
+    for role, role_data in ROLE_DICT.items():
+        if re.search(rf"(?<!\w){re.escape(role.lower())}(?!\w)", lower):
+            keywords.add(role)
+            keywords.add(role_data["family"])
+    for family in {"Nobility", "Commoners", "Clergy"}:
+        if family.lower() in lower or family.rstrip("s").lower() in lower:
+            keywords.add(family)
+    return keywords
 
 
 def family_counts(players):

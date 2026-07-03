@@ -18,13 +18,13 @@ The conversations you have participated in so far for the last several minutes h
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
-Given that {stay_at_table_reason}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
+Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
 - Speak (truthfully, misleadingly, strategically, or just casually)
 - Reveal your card
 - React to others' actions or provocations
 {ability_msg}
 
-For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, how urgently you want to use your ability (and in the process reveal your role at everyone at your current table) to the conversation in particular. For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first.
+{ability_bid_action_clarification}
 - BID OPTIONS:
   0: I have no intention of using my ability right now—either the condition is not met, or it would be a waste.
   1: I’m mildly considering using my ability, maybe to pressure others or set up a situation.

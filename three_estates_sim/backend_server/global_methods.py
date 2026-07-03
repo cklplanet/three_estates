@@ -22,10 +22,15 @@ def timedelta_to_natural(delta):
 
 def table_leave_timer_status(table_name, curr_time):
     delta = TIMERS[table_name] - curr_time
-    if delta <= datetime.timedelta(0):
+    if delta < datetime.timedelta(0):
         return (
             f"{table_name} timer has expired; players at {table_name} can no longer leave by normal movement, "
             "but players may still enter that table."
+        )
+    if delta == datetime.timedelta(0):
+        return (
+            f"{table_name} has less than 1 second left and is about to close down NOW; "
+            "players there may still leave only before the next timer check resolves the lockdown."
         )
     return f"{timedelta_to_natural(delta)} remaining before players at {table_name} can no longer leave by normal movement."
 

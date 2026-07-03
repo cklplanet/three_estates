@@ -20,7 +20,7 @@ The conversations you have participated in so far for the last several minutes h
 You currently have a valid card retrieval opportunity:
 {retrieval_options}
 
-Given that {stay_at_table_reason}, decide how strongly you want to spend the table's attention right now to retrieve the card.
+Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, decide how strongly you want to spend the table's attention right now to retrieve the card.
 Current table leave timer status: {table_time_left}
 There are {total_time_left} until the game ends entirely.
 

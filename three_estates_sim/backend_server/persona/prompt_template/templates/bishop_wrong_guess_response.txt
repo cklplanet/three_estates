@@ -1,0 +1,42 @@
+{PREFIX}
+
+GAME CONTEXT:
+- {personal_context_msg}
+
+All information you can recall regarding your current table:
+
+- {current_table_context}
+
+The conversations you have participated in so far for the last several minutes have been as follows:
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+
+{other_table_additional_context}
+
+The Bishop {bishop_name} has just guessed your family as {guessed_family}, but your actual role is {actual_role} and your actual family is {actual_family}. You may choose how to respond.
+
+Your own role card status: {card_status}
+
+Response options:
+- "hard reveal": reveal your actual role card to prove the Bishop was wrong. Only choose this if your own role card is currently in your hands.
+- "soft reveal": verbally claim your exact role or family without proving it with your card.
+- "no reveal": refuse to commit to any role or family claim, deflect, or say nothing precise.
+
+Natural reaction discipline:
+- This is an immediate response to a wrong Bishop guess, not a full speech.
+- One sentence is ideal; two short sentences maximum.
+- If hard revealing, make the line sound like it accompanies showing the card.
+- If soft revealing, make it clear whether you are claiming exact role or family without proof.
+- If refusing, do not accidentally reveal your role or family anyway.
+- Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
+- Remember that voices at and only at "practically screaming" - not just "loud" - volume CAN be potentially heard by other tables (and players transiting in between)
+
+Return ONLY the json dict below.
+
+- "reasoning": "string", // Explain in-character why you choose hard reveal, soft reveal, or no reveal in one or two sentences.
+- "response": "string", // exactly one of: "hard reveal" | "soft reveal" | "no reveal"
+- "object": "string", // either exactly "everyone" or one player currently at the table
+- "volume": "string", // exactly one of: "whisper" | "calm" | "loud" | "practically screaming"
+- "line": "string" // The spoken line.

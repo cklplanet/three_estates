@@ -3,9 +3,10 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-You are the {role}. You have already independently decided to leave your current table for {destination}.
+You are the {role}. You are about to leave your current table for {destination}.
+Movement timing note: {movement_duration_hint}
 
-Your movement reasoning was:
+Your movement context/reasoning was:
 {movement_reasoning}
 
 Your movement-triggered ability:

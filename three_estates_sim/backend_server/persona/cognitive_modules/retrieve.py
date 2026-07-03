@@ -14,10 +14,11 @@ from numpy import dot
 from numpy.linalg import norm
 
 def strictly_past_nodes(persona, nodes):
-    return [
+    filtered = [
         node for node in nodes
         if node.created is not None and node.created < persona.scratch.curr_time
     ]
+    return sorted(filtered, key=lambda node: (node.created, node.node_count), reverse=True)
 
 
 def retrieve(persona, room, self_table_perceived, other_tables_perceived): 
@@ -27,11 +28,11 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
     other_retrieved_lines_related = dict()
 
     def filter_nonoverlapping_chat(chat_dict, existing_events, existing_thoughts):
-        all_existing_ids = {e.description for e in existing_events}.union(
-                           {t.description for t in existing_thoughts})
+        all_existing_ids = {e.node_id for e in existing_events}.union(
+                           {t.node_id for t in existing_thoughts})
         filtered_chat = {}
         for k, vlist in chat_dict.items():
-            filtered_vlist = [node for node in vlist if node.description not in all_existing_ids]
+            filtered_vlist = [node for node in vlist if node.node_id not in all_existing_ids]
             if filtered_vlist:
                 filtered_chat[k] = filtered_vlist
         return filtered_chat

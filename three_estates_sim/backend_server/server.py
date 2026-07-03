@@ -2,7 +2,9 @@ from persona.persona import *
 from room import *
 from utils import *
 from persona.cognitive_modules.plan import *
+from persona.cognitive_modules.perceive import unpack_dialogue, generate_poig_score
 from persona.prompt_template.run_gpt_prompt import run_gpt_prompt_generate_vn_epilogue
+from persona.prompt_template.gpt_structure import get_embedding
 import datetime
 import random
 import itertools
@@ -19,12 +21,18 @@ SESSION_CONTEXT_FILE = "character_context.json"
 SESSION_METADATA_FILE = "session_metadata.json"
 SESSION_STATE_FILE = "session_state.json"
 RUN_LOG_TIME_FORMAT = "%Y%m%d_%H%M%S"
+PHASE_CHECKPOINT_FILES = {
+    "departure_phase_complete": "session_state_last_departure_phase.json",
+    "bidding_phase_complete": "session_state_last_bidding_phase.json",
+    "arrival_phase_complete": "session_state_last_arrival_phase.json",
+    "timestep_complete": "session_state_last_timestep_complete.json",
+}
 NON_PERSONA_SESSION_DIRS = {"dialogue_logs"}
 NEW_SESSION_ALIASES = {"new", "n", "start new", "restart", "fresh"}
 CONTINUE_SESSION_ALIASES = {"continue", "c", "resume", "r", "load"}
 REUSE_CAST_SAME_ROLES_ALIASES = {"same roles", "same", "reuse roles", "reuse same", "cast roles", "2"}
 REUSE_CAST_REROLL_ROLES_ALIASES = {"reroll roles", "reroll", "reassign roles", "reuse reroll", "cast reroll", "3"}
-MIN_ACTION_BID_SCORE = 2
+REUSE_EXACT_SETUP_ALIASES = {"exact setup", "exact", "same setup", "same tables", "reuse exact", "4"}
 
 
 class ThreeEstatesServer:
@@ -32,13 +40,14 @@ class ThreeEstatesServer:
         self.personas = dict()
         self.room = RoomGraph(self.personas)
         self.personas_loc = dict()
-        self.sec_per_step = 10
+        self.sec_per_step = SIM_SECONDS_PER_STEP
         self.curr_time = datetime.timedelta(0)
-        self.server_sleep = 5
+        self.server_sleep = SERVER_SLEEP_SECONDS
         self.session_id = None
         self.dialogue_log_path = None
         self.clean_dialogue_log_path = None
         self.debug_log_path = None
+        self.next_phase = "departure"
 
     def randomized_starting_movement_cooldown(self):
         low = max(0, STARTING_MOVEMENT_COOLDOWN_STEPS - STARTING_MOVEMENT_COOLDOWN_RADIUS)
@@ -107,6 +116,66 @@ class ThreeEstatesServer:
                 return True
         return False
 
+    def sync_persona_times(self):
+        for persona in self.personas.values():
+            persona.scratch.curr_time = self.curr_time
+
+    def refresh_audible_dialogue_limits(self):
+        self.room.audible_dialogue_limits = {
+            table_name: len(table.dialogue_history)
+            for table_name, table in self.room.locations.items()
+        }
+
+    def advance_phase_time(self, phase_name):
+        self.curr_time += datetime.timedelta(seconds=self.sec_per_step)
+        self.sync_persona_times()
+        self.refresh_audible_dialogue_limits()
+        if debug:
+            debug_log(
+                f"[PHASE-TIME] phase={phase_name} | advanced_by={self.sec_per_step}s | t={self.curr_time}"
+            )
+
+    def enter_transit(self, name, source_table, destination, benefactor=None):
+        self.personas[name].scratch.curr_loc = destination
+        self.room.locations[destination].incoming_arrivals.add((name, benefactor, source_table))
+        self.room.transit[name] = {
+            "source": source_table,
+            "destination": destination,
+            "benefactor": benefactor,
+            "since": self.curr_time,
+            "dialogue_cursors": {
+                table_name: len(table.dialogue_history)
+                for table_name, table in self.room.locations.items()
+            }
+        }
+
+    def resolve_departure_record(self, table, table_name, departure):
+        name = departure["name"]
+        destination = departure["destination"]
+        benefactor = departure.get("benefactor")
+        if name not in table.personas:
+            return False
+        self.clear_table_locks(table, name, "leave")
+        if departure.get("farewell", True):
+            special_circumstance = f"you have decided to leave {table.name} for {destination};"
+            movement_reasoning = self.personas[name].scratch.current_movement_reasoning
+            movement_destination = self.personas[name].scratch.current_movement_destination
+            if movement_reasoning and movement_destination == destination and not benefactor:
+                special_circumstance += f" your movement reasoning was: {movement_reasoning}."
+            if departure.get("speech_constraint"):
+                special_circumstance += f" {departure['speech_constraint']}."
+            special_circumstance += " As parting words before you depart, "
+            self.personas[name].speak(table, special_circumstance, consume_cooldown=False)
+        event_msg = departure.get("event_msg")
+        if event_msg:
+            table.add_table_event((name, None, event_msg, self.curr_time, set([name])))
+        self.enter_transit(name, table_name, destination, benefactor)
+        del table.personas[name]
+        spinster_reveal_target = departure.get("spinster_reveal_target")
+        if spinster_reveal_target:
+            self.personas[name].resolve_spinster_forced_reveal(table, spinster_reveal_target)
+        return True
+
     def process_removal_targets(self, table, table_name, only_roles=None):
         removal_targets = list(table.removal_targets)
         random.shuffle(removal_targets)
@@ -119,22 +188,337 @@ class ThreeEstatesServer:
             table.removal_targets.remove(removal_target)
             target_name = removal_target[1]
             destination = removal_target[3]
+            if target_name not in table.personas:
+                continue
             target_persona = self.personas[target_name]
             self.clear_table_locks(table, target_name, "leave")
-            target_persona.scratch.curr_loc = destination
-            self.room.locations[destination].incoming_arrivals.add((target_name, removal_target[0], table_name))
+            bishop_exile_result = {}
+            if action_role == "Bishop":
+                bishop_exile_result = self.resolve_bishop_exile_movement_ability(table, table_name, target_persona, destination, removal_target[0])
+                destination = bishop_exile_result.get("destination", destination)
+            self.enter_transit(target_name, table_name, destination, removal_target[0])
             if target_name in table.personas:
                 del table.personas[target_name]
+            bishop_spinster_reveal_target = bishop_exile_result.get("spinster_reveal_target")
+            if bishop_spinster_reveal_target and target_persona.scratch.role == "Spinster":
+                target_persona.resolve_spinster_forced_reveal(table, bishop_spinster_reveal_target)
             if len(removal_target) > 4 and target_persona.scratch.role == "Spinster":
                 target_persona.resolve_spinster_forced_reveal(table, removal_target[4])
 
+    def resolve_bishop_exile_movement_ability(self, table, table_name, exiled_persona, destination, bishop_name):
+        role = exiled_persona.scratch.role
+        if role not in {"Queen", "Spinster"}:
+            return {}
+        if role not in exiled_persona.scratch.cards_slot:
+            return {}
+        if len(table.personas) <= 1:
+            return {}
+        if role == "Spinster" and table.name != "Village":
+            return {}
+
+        force_context = (
+            f"You are being forced to leave {table.name} for {destination} because Bishop {bishop_name} "
+            "correctly guessed your family. Even though the departure is forced, your movement-triggered "
+            "ability may still be attached to the moment of leaving if revealing your card is worth it."
+        )
+        should_use, ability_reasoning = exiled_persona.decide_movement_ability_use(
+            table,
+            destination,
+            movement_reasoning_override=force_context,
+        )
+        if not should_use:
+            return {}
+
+        target_name = exiled_persona.select_ability_target(table, ability_reasoning)
+        if target_name not in table.personas or target_name == exiled_persona.scratch.name:
+            return {}
+        poss = exiled_persona.possessive_for()
+        obj = "her" if exiled_persona.scratch.gender == "female" else "him"
+
+        if role == "Queen":
+            ability_attempt_context = (
+                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Queen')} and attempts to use "
+                f"{poss} Queen ability on {target_name} while being exiled by Bishop {bishop_name} to {destination}."
+            )
+            exiled_persona.speak(
+                table,
+                f"Bishop {bishop_name} is forcing you to leave for {destination}; now you are revealing your Queen card "
+                f"and trying to make {target_name} follow you. Your ability-use reasoning was: {ability_reasoning}",
+                consume_cooldown=False,
+            )
+            table.add_table_event((exiled_persona.scratch.name, target_name, ability_attempt_context, self.curr_time, set([exiled_persona.scratch.name, target_name, bishop_name])))
+            if exiled_persona.resolve_baron_reaction(table, exiled_persona.scratch.name, ability_attempt_context, block_ability=True):
+                exiled_persona.update_knowledge(self.room)
+                _, _, _, _, retrieved_all_tables = exiled_persona.scratch.retrieved
+                blocked_context = (
+                    f"Bishop {bishop_name} is still forcing you to leave {table.name}, but your Queen ability was just blocked "
+                    f"and your Queen card may no longer be in your hand. Choose your exile destination again under this new context."
+                )
+                new_destination = exiled_persona.select_ability_destination(table, retrieved_all_tables, blocked_context)
+                exiled_persona.speak(
+                    table,
+                    f"your Queen ability was blocked while you were being exiled by Bishop {bishop_name}; "
+                    f"you must still leave, and you have now chosen to go to {new_destination}",
+                    consume_cooldown=False,
+                )
+                return {"destination": new_destination}
+            exiled_persona.scratch.ability_active = True
+            table.personas[target_name].speak(
+                table,
+                f"the exiled Queen {exiled_persona.scratch.name} has activated {poss} ability, chose you as the target, and is dragging you to {destination}, as parting words,",
+                consume_cooldown=False,
+            )
+            event_msg = (
+                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Queen')} while being exiled "
+                f"and drags {target_name} to {destination} with {obj} using {poss} ability."
+            )
+            table.add_table_event((exiled_persona.scratch.name, target_name, event_msg, self.curr_time, set([exiled_persona.scratch.name, target_name, bishop_name])))
+            self.clear_table_locks(table, target_name, "leave")
+            self.enter_transit(target_name, table_name, destination, exiled_persona.scratch.name)
+            if target_name in table.personas:
+                del table.personas[target_name]
+            return {}
+
+        if role == "Spinster":
+            ability_attempt_context = (
+                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Spinster')} and attempts to use "
+                f"{poss} Spinster ability on {target_name} while being exiled by Bishop {bishop_name} to {destination}."
+            )
+            exiled_persona.speak(
+                table,
+                f"Bishop {bishop_name} is forcing you to leave for {destination}; now you are revealing your Spinster card "
+                f"and marking {target_name}. Your ability-use reasoning was: {ability_reasoning}",
+                consume_cooldown=False,
+            )
+            table.add_table_event((exiled_persona.scratch.name, target_name, ability_attempt_context, self.curr_time, set([exiled_persona.scratch.name, target_name, bishop_name])))
+            table.add_table_event((
+                exiled_persona.scratch.name,
+                None,
+                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Spinster')} while being exiled and leaves for {destination}.",
+                self.curr_time,
+                set([exiled_persona.scratch.name, target_name, bishop_name]),
+            ))
+            return {"spinster_reveal_target": target_name}
+
+        return {}
+
     def expire_table_timer_if_needed(self, table):
-        if table.timer_expired or self.curr_time < TIMERS[table.name]:
+        if table.timer_expired or self.curr_time <= TIMERS[table.name]:
             return
         table.timer_expired = True
         act_desp = f"The {table.name} timer expires; {table.name} is now locked down, and players there can no longer leave by normal movement."
         timer_event = ("system", None, act_desp, self.curr_time, set([table.name] + list(table.personas.keys())))
         table.add_table_event(timer_event)
+
+    def reset_urgent_table_movement_cooldowns(self, table):
+        if table.timer_expired:
+            return
+        time_left = TIMERS[table.name] - self.curr_time
+        urgency_window = datetime.timedelta(seconds=2 * self.sec_per_step)
+        if datetime.timedelta(0) <= time_left <= urgency_window:
+            reset_names = []
+            for persona in table.personas.values():
+                if persona.scratch.movement_cooldown > 0:
+                    persona.scratch.movement_cooldown = 0
+                    reset_names.append(persona.scratch.name)
+            if reset_names and debug:
+                debug_log(
+                    f"[TIMER-URGENCY] t={self.curr_time} | table={table.name} | "
+                    f"time_left={time_left} | reset_movement_cooldowns={reset_names}"
+                )
+
+    def run_movement_phase_for_table(self, table_name, table):
+        self.expire_table_timer_if_needed(table)
+        self.reset_urgent_table_movement_cooldowns(table)
+        departed = False
+        persona_order = list(table.personas.keys())
+        for persona_name in persona_order:
+            if persona_name not in table.personas:
+                continue
+            persona = table.personas[persona_name]
+            persona.update_knowledge(self.room)
+            retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = persona.scratch.retrieved
+
+            if persona.scratch.movement_cooldown > 0:
+                continue
+            if table.timer_expired:
+                continue
+            if self.is_locked_at_table(table, persona_name):
+                continue
+            next_loc = decide_on_leaving(persona, table, retrieved_all_tables)
+            if next_loc == "stay":
+                persona.scratch.movement_cooldown = MOVEMENT_STAY_COOLDOWN_STEPS
+                continue
+            persona.scratch.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
+            departures = persona.movement_departure_records(table, next_loc)
+            if departures:
+                table.bishop_trigger = True
+            selected_departures = {}
+            departure_order = []
+            for departure in departures:
+                departure_name = departure["name"]
+                if departure_name not in selected_departures:
+                    departure_order.append(departure_name)
+                    selected_departures[departure_name] = departure
+                elif departure.get("benefactor") is not None:
+                    selected_departures[departure_name] = departure
+            random.shuffle(departure_order)
+            for departure_name in departure_order:
+                if self.resolve_departure_record(table, table_name, selected_departures[departure_name]):
+                    departed = True
+        return departed
+
+    def run_bidding_phase_for_table(self, table_name, table):
+        table_bidding_results = dict()
+        for persona_name, persona in list(table.personas.items()):
+            persona.update_knowledge(self.room)
+            result = bid(persona, table)
+            table_bidding_results[persona.name] = result
+
+        final_table_results = [(name, points) for name, points in sorted(table_bidding_results.items(), key=lambda item: item[1], reverse=True)]
+        if debug:
+            debug_log(f"[BID-RESULT] t={self.curr_time} | table={table.name} | ranking={final_table_results}")
+
+        if final_table_results:
+            EPS = 1e-6
+            top_score = final_table_results[0][1]
+            if top_score < MIN_ACTION_BID_SCORE:
+                eligible_speakers = [
+                    name for name, persona in table.personas.items()
+                    if persona.scratch.speaking_cooldown <= 0
+                ]
+                if debug:
+                    debug_log(
+                        f"[LOW-BID-FALLBACK] t={self.curr_time} | table={table.name} | "
+                        f"top_score={top_score} | threshold={MIN_ACTION_BID_SCORE} | "
+                        f"eligible_speakers={eligible_speakers} | ranking={final_table_results}"
+                    )
+                if eligible_speakers:
+                    fallback_speaker = random.choice(eligible_speakers)
+                    fallback_persona = table.personas[fallback_speaker]
+                    fallback_persona.scratch.act_reasoning = (
+                        "no action bid was strong enough to force the table's attention"
+                    )
+                    fallback_persona.speak(table)
+                else:
+                    act_desp = "The table falls quiet; no action bid is strong enough and everyone is still waiting for space to speak."
+                    table.add_table_event(("system", None, act_desp, self.curr_time, set(table.personas.keys())))
+            else:
+                top_candidates = [name for name, pts in final_table_results if abs(pts - top_score) <= EPS]
+                winner = random.choice(top_candidates)
+                if debug:
+                    debug_log(f"[ACTOR] t={self.curr_time} | table={table.name} | winner={winner} | top_score={top_score} | tied={top_candidates}")
+                table.personas[winner].act(table)
+                self.process_removal_targets(table, table_name, only_roles={"Spinster"})
+
+        table.bishop_trigger = False
+        self.process_removal_targets(table, table_name)
+
+    def perceive_transit_screams_on_landfall(self, persona):
+        transit_data = self.room.transit.get(persona.scratch.name)
+        if not transit_data:
+            return
+        cursor_map = transit_data.get("dialogue_cursors", {})
+        perceived = []
+        for other_table_name, other_table in self.room.locations.items():
+            cursor = cursor_map.get(other_table_name, len(other_table.dialogue_history))
+            audible_limit = self.room.audible_dialogue_limits.get(other_table_name, len(other_table.dialogue_history))
+            audible_limit = min(audible_limit, len(other_table.dialogue_history))
+            for utterance in other_table.dialogue_history[cursor:audible_limit]:
+                s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
+                if volume != "practically screaming":
+                    continue
+                audience_text = ", ".join(sorted(audience)) if audience else "unknown"
+                description = (
+                    f"{s_chat}: ({volume}, overheard while in transit from the {other_table_name}; "
+                    f"people physically present there: {audience_text}) {line}"
+                )
+                poignancy = generate_poig_score(persona, "chat", description, s_chat, o_chat, keywords_chat)
+                embedding = persona.a_mem.embeddings.get(description) or get_embedding(description)
+                node = persona.a_mem.add_chat(
+                    timestamp_chat,
+                    s_chat,
+                    o_chat,
+                    "Transit",
+                    description,
+                    set(keywords_chat or []) | {s_chat, o_chat, other_table_name, "Transit"},
+                    poignancy,
+                    (description, embedding),
+                )
+                perceived.append(node)
+                persona.scratch.importance_ele_n += 1
+            persona.scratch.overheard_dialogue_cursors[other_table_name] = audible_limit
+        if perceived:
+            persona.scratch.recent_conversation[0:0] = [(persona.scratch.curr_time, perceived)]
+            persona.scratch.recent_conversation = persona.scratch.recent_conversation[:persona.scratch.retention]
+            debug_perception(persona, "Transit", 0, len(perceived))
+
+    def run_arrival_phase_for_table(self, table_name, table):
+        innkeeper = None
+        innkeeper_source_table = None
+        queen_followups = []
+        incoming_arrivals = list(table.incoming_arrivals)
+        had_arrivals = bool(incoming_arrivals)
+        random.shuffle(incoming_arrivals)
+        for candidate, benefactor, source_table in incoming_arrivals:
+            if table.lockdown_targets:
+                self.clear_table_locks(table, candidate, "enter")
+            arriving_persona = self.personas[candidate]
+            self.perceive_transit_screams_on_landfall(arriving_persona)
+            self.sync_persona_to_table_history_end(arriving_persona, table_name)
+            table.personas[candidate] = arriving_persona
+            self.room.transit.pop(candidate, None)
+            act_desp = f"{candidate} arrives from {source_table}"
+            arrival_event = (candidate, None, act_desp, self.personas[candidate].scratch.curr_time, set([candidate]))
+            table.add_table_event(arrival_event)
+            arriving_persona.update_knowledge(self.room)
+            if (
+                table.name == "Village"
+                and arriving_persona.scratch.role == "Innkeeper"
+                and "Innkeeper" in arriving_persona.scratch.cards_slot
+                and (
+                    arriving_persona.scratch.ability_active
+                    or arriving_persona.decide_innkeeper_declaration(table, source_table)
+                )
+            ):
+                arriving_persona.scratch.ability_active = True
+                innkeeper = candidate
+                innkeeper_source_table = source_table
+            else:
+                special_circumstance = self.arrival_speaking_context(
+                    arriving_persona,
+                    table.name,
+                    source_table,
+                    benefactor=benefactor,
+                )
+                arriving_persona.speak(table, special_circumstance, consume_cooldown=False)
+            if benefactor:
+                queen_followups.append((benefactor, candidate))
+        for benefactor, candidate in queen_followups:
+            if benefactor and benefactor in table.personas and table.personas[benefactor].scratch.role == "Queen":
+                if self.add_lock_if_allowed(table, benefactor, candidate, "Queen"):
+                    table.personas[benefactor].scratch.ability_objects.append(candidate)
+        if innkeeper:
+            innkeeper = self.personas[innkeeper]
+            innkeeper_announcement = self.arrival_speaking_context(
+                innkeeper,
+                table.name,
+                innkeeper_source_table or "another table",
+                base_context="you have just arrived here and are revealing your Innkeeper card to declare yourself as Innkeeper and lock down the Village",
+            )
+            innkeeper.speak(table, special_circumstance=innkeeper_announcement, consume_cooldown=False)
+
+            for other_player_name, other_player in table.personas.items():
+                if other_player_name != innkeeper.scratch.name:
+                    if self.add_lock_if_allowed(table, innkeeper.scratch.name, other_player_name, innkeeper.scratch.role):
+                        innkeeper.scratch.ability_objects.append(other_player_name)
+
+            act_desp = f"{innkeeper.scratch.name} reveals {innkeeper.role_card_text(role='Innkeeper')}, declares themself as Innkeeper, and locks down everyone at the Village"
+            lockdown_event = (innkeeper.scratch.name, None, act_desp, self.curr_time, set([innkeeper.scratch.name] + innkeeper.scratch.ability_objects))
+            table.add_table_event(lockdown_event)
+
+        table.incoming_arrivals = set()
+        return had_arrivals
 
     def run_spinster_endgame_guess_round(self):
         for table in self.room.locations.values():
@@ -248,6 +632,7 @@ class ThreeEstatesServer:
                 "- 'new' to archive everything and generate a fully new cast\n"
                 "- 'same roles' to reuse these characters and roles, but wipe game state/memory/logs\n"
                 "- 'reroll roles' to reuse these characters with reassigned roles, wiping game state/memory/logs\n"
+                "- 'exact setup' to reuse these characters, roles, and starting tables, wiping game state/memory/logs\n"
             ).strip().lower()
             if choice in CONTINUE_SESSION_ALIASES:
                 return "resume" if has_checkpoint else "legacy"
@@ -259,7 +644,9 @@ class ThreeEstatesServer:
                 return "reuse_same_roles"
             if choice in REUSE_CAST_REROLL_ROLES_ALIASES:
                 return "reuse_reroll_roles"
-            print("Please type 'continue', 'new', 'same roles', or 'reroll roles'.")
+            if choice in REUSE_EXACT_SETUP_ALIASES:
+                return "reuse_exact_setup"
+            print("Please type 'continue', 'new', 'same roles', 'reroll roles', or 'exact setup'.")
 
     def metadata_payload(self):
         return {
@@ -335,6 +722,15 @@ class ThreeEstatesServer:
             "timer_expired": table.timer_expired,
         }
 
+    def serialize_transit(self):
+        return {
+            name: {
+                **data,
+                "since": data["since"].total_seconds() if isinstance(data.get("since"), datetime.timedelta) else data.get("since", 0),
+            }
+            for name, data in self.room.transit.items()
+        }
+
     def restore_table(self, table_name, table_state):
         table = self.room.locations[table_name]
         table.personas = {
@@ -354,7 +750,24 @@ class ThreeEstatesServer:
         table.spinster_marked = tuple(spinster_marked) if spinster_marked else None
         table.timer_expired = table_state.get("timer_expired", False)
 
+    def restore_transit(self, transit_state):
+        self.room.transit = {}
+        for name, data in (transit_state or {}).items():
+            self.room.transit[name] = {
+                "source": data.get("source"),
+                "destination": data.get("destination"),
+                "benefactor": data.get("benefactor"),
+                "since": datetime.timedelta(seconds=data.get("since", 0)),
+                "dialogue_cursors": data.get("dialogue_cursors", {}),
+            }
+
     def save_checkpoint(self, reason):
+        def write_state_file(path, payload):
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w") as outfile:
+                json.dump(payload, outfile, indent=2)
+            os.replace(tmp_path, path)
+
         os.makedirs(save_file, exist_ok=True)
         if not self.session_id:
             self.session_id = uuid.uuid4().hex[:12]
@@ -366,16 +779,19 @@ class ThreeEstatesServer:
             "save_reason": reason,
             "curr_time": self.curr_time.total_seconds(),
             "sec_per_step": self.sec_per_step,
+            "next_phase": self.next_phase,
             "tables": {
                 table_name: self.serialize_table(table)
                 for table_name, table in self.room.locations.items()
             },
+            "transit": self.serialize_transit(),
+            "audible_dialogue_limits": self.room.audible_dialogue_limits,
         }
         state_path = self.session_state_path()
-        tmp_path = f"{state_path}.tmp"
-        with open(tmp_path, "w") as outfile:
-            json.dump(state, outfile, indent=2)
-        os.replace(tmp_path, state_path)
+        write_state_file(state_path, state)
+        phase_checkpoint_file = PHASE_CHECKPOINT_FILES.get(reason)
+        if phase_checkpoint_file:
+            write_state_file(os.path.join(save_file, phase_checkpoint_file), state)
         self.save_session_metadata()
         print(f"Saved game checkpoint ({reason}) to: {state_path}")
 
@@ -394,9 +810,19 @@ class ThreeEstatesServer:
         self.session_id = state.get("session_id") or self.session_id or uuid.uuid4().hex[:12]
         self.curr_time = datetime.timedelta(seconds=state.get("curr_time", 0))
         self.sec_per_step = state.get("sec_per_step", self.sec_per_step)
+        self.next_phase = state.get("next_phase", "departure")
         for table_name, table_state in state.get("tables", {}).items():
             if table_name in self.room.locations:
                 self.restore_table(table_name, table_state)
+        self.restore_transit(state.get("transit", {}))
+        restored_limits = state.get("audible_dialogue_limits")
+        if restored_limits is None:
+            self.refresh_audible_dialogue_limits()
+        else:
+            self.room.audible_dialogue_limits = {
+                table_name: int(restored_limits.get(table_name, len(table.dialogue_history)))
+                for table_name, table in self.room.locations.items()
+            }
         for persona in self.personas.values():
             persona.scratch.curr_time = self.curr_time
             persona.rebuild_recent_conversation_from_memory()
@@ -514,11 +940,12 @@ class ThreeEstatesServer:
                 "age": scratch.get("age"),
                 "innate": scratch.get("innate"),
                 "role": scratch.get("role"),
+                "starting_table": scratch.get("curr_loc"),
                 "group_context": scratch.get("group_context"),
             })
         return cast
 
-    def rebuild_clean_cast(self, cast, roles, reroll_roles=False):
+    def rebuild_clean_cast(self, cast, roles, reroll_roles=False, preserve_tables=False):
         if len(cast) > len(roles):
             raise ValueError(f"More saved characters than available roles in {save_file}")
         if reroll_roles:
@@ -568,6 +995,8 @@ class ThreeEstatesServer:
             persona.scratch.age = character.get("age")
             persona.scratch.innate = character.get("innate")
             persona.scratch.group_context = character.get("group_context")
+            if preserve_tables and character.get("starting_table") in {"Village", "Castle", "Forest"}:
+                persona.scratch.curr_loc = character.get("starting_table")
             self.personas[persona.scratch.name] = persona
             persona.save(os.path.join(save_file, persona.scratch.name))
 
@@ -597,7 +1026,7 @@ class ThreeEstatesServer:
         if not resume_existing or not self.debug_log_path:
             timestamp = datetime.datetime.now().strftime(RUN_LOG_TIME_FORMAT)
             self.debug_log_path = os.path.join(log_dir, f"debug_{self.session_id}_{timestamp}.log")
-        set_dialogue_log_path(self.dialogue_log_path)
+        set_dialogue_log_path(self.dialogue_log_path, log_dir=log_dir)
         set_clean_dialogue_log_path(self.clean_dialogue_log_path)
         set_debug_log_path(self.debug_log_path)
         self.save_session_metadata()
@@ -639,7 +1068,13 @@ class ThreeEstatesServer:
                 )
         character_lines = []
         for name, persona in sorted(self.personas.items()):
-            character_lines.append(f"{name}: {persona.scratch.get_str_iss()}")
+            last_move_thought = persona.scratch.current_movement_reasoning or "No recent move/stay reasoning recorded."
+            last_move_destination = persona.scratch.current_movement_destination or persona.scratch.curr_loc
+            character_lines.append(
+                f"{name}: {persona.scratch.get_str_iss()}\n"
+                f"Last recorded move/stay intent: {last_move_thought} "
+                f"(destination/status: {last_move_destination})"
+            )
         flipped = ", ".join(results["flipped_by_spinster"]) if results["flipped_by_spinster"] else "none"
         return (
             f"Session id: {self.session_id}\n"
@@ -694,7 +1129,8 @@ class ThreeEstatesServer:
             session_mode = self.choose_session_mode()
             resume_from_checkpoint = session_mode == "resume"
             generated_new_characters = session_mode == "new"
-            reused_existing_characters = session_mode in {"reuse_same_roles", "reuse_reroll_roles"}
+            reused_existing_characters = session_mode in {"reuse_same_roles", "reuse_reroll_roles", "reuse_exact_setup"}
+            reuse_exact_setup = session_mode == "reuse_exact_setup"
             if session_mode in {"resume", "legacy"}:
                 print("save file detected, loading")
                 self.load_session_metadata()
@@ -727,7 +1163,12 @@ class ThreeEstatesServer:
                 self.clean_dialogue_log_path = None
                 self.debug_log_path = None
                 self.save_character_context(character_group_context, name_mode)
-                self.rebuild_clean_cast(cast, roles, reroll_roles=(session_mode == "reuse_reroll_roles"))
+                self.rebuild_clean_cast(
+                    cast,
+                    roles,
+                    reroll_roles=(session_mode == "reuse_reroll_roles"),
+                    preserve_tables=reuse_exact_setup,
+                )
                 self.initialize_dialogue_log()
                 self.save_personas_only("clean_character_reuse_complete")
             else:
@@ -772,7 +1213,7 @@ class ThreeEstatesServer:
                     self.save_personas_only("relationship_generation_complete")
 
                 for persona_name, persona in self.personas.items():
-                    starting_table = random.choice(["Village", "Castle", "Forest"])
+                    starting_table = persona.scratch.curr_loc if reuse_exact_setup and persona.scratch.curr_loc in {"Village", "Castle", "Forest"} else random.choice(["Village", "Castle", "Forest"])
                     persona.scratch.curr_loc = starting_table
                     persona.scratch.movement_cooldown = self.randomized_starting_movement_cooldown()
                     persona.scratch.dialogue_cursors = {}
@@ -786,6 +1227,7 @@ class ThreeEstatesServer:
                             f"object_id={id(persona)} | starting_table={starting_table} | "
                             f"starting_movement_cooldown={persona.scratch.movement_cooldown}"
                         )
+                self.refresh_audible_dialogue_limits()
                 self.save_checkpoint("session_start")
             else:
                 if debug:
@@ -794,186 +1236,56 @@ class ThreeEstatesServer:
             while True:
                 print(f"{timedelta_to_natural(self.curr_time)} since the game started")
 
-                if self.curr_time >= game_end_time():
+                if self.next_phase == "departure" and self.curr_time > game_end_time():
                     for table in self.room.locations.values():
                         self.expire_table_timer_if_needed(table)
                     break
                 game_timer = game_end_time() - self.curr_time
                 print(f"{timedelta_to_natural(game_timer)} left until the game ends")
 
-                for table_name, table in self.room.locations.items():
-                    self.expire_table_timer_if_needed(table)
+                if self.next_phase == "departure":
+                    any_departures = False
+                    for table_name, table in self.room.locations.items():
+                        any_departures = self.run_movement_phase_for_table(table_name, table) or any_departures
+                    if any_departures:
+                        self.advance_phase_time("departure")
+                    self.next_phase = "bidding"
+                    self.save_checkpoint("departure_phase_complete")
+                    continue
 
-                    table_bidding_results = dict()
-                    to_remove = []
-                    for persona_name, persona in table.personas.items():
-                        persona.update_knowledge(self.room)
-                        retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = persona.scratch.retrieved
+                if self.next_phase == "bidding":
+                    for table_name, table in self.room.locations.items():
+                        self.expire_table_timer_if_needed(table)
+                        self.run_bidding_phase_for_table(table_name, table)
+                    self.advance_phase_time("bidding")
+                    self.next_phase = "arrival"
+                    self.save_checkpoint("bidding_phase_complete")
+                    continue
 
-                        if persona.scratch.movement_cooldown <= 0:
-                            if table.timer_expired == False:
-                                if self.is_locked_at_table(table, persona_name):
-                                    continue
-                                next_loc = decide_on_leaving(persona, table, retrieved_all_tables)
-                                if next_loc != "stay":
-                                    persona.scratch.movement_cooldown = MOVEMENT_LEAVE_COOLDOWN_STEPS
-                                    to_remove.extend(persona.movement_departure_records(table, next_loc))
-                                else:
-                                    persona.scratch.movement_cooldown = MOVEMENT_STAY_COOLDOWN_STEPS
+                if self.next_phase == "arrival":
+                    any_arrivals = False
+                    for table_name, table in self.room.locations.items():
+                        any_arrivals = self.run_arrival_phase_for_table(table_name, table) or any_arrivals
+                    if any_arrivals:
+                        self.advance_phase_time("arrival")
+                    self.next_phase = "cleanup"
+                    self.save_checkpoint("arrival_phase_complete")
+                    continue
 
-                    if table.removal_targets or to_remove:
-                        table.bishop_trigger = True
-                    table.removal_targets = set()
-                    selected_departures = {}
-                    departure_order = []
-                    for departure in to_remove:
-                        departure_name = departure["name"]
-                        if departure_name not in selected_departures:
-                            departure_order.append(departure_name)
-                            selected_departures[departure_name] = departure
-                        elif departure.get("benefactor") is not None:
-                            selected_departures[departure_name] = departure
-                    random.shuffle(departure_order)
+                if self.next_phase == "cleanup":
+                    for persona in self.personas.values():
+                        persona.scratch.movement_cooldown = max(0, persona.scratch.movement_cooldown - 1)
+                        persona.scratch.speaking_cooldown = max(0, persona.scratch.speaking_cooldown - 1)
 
-                    for name in departure_order:
-                        departure = selected_departures[name]
-                        destination = departure["destination"]
-                        benefactor = departure.get("benefactor")
-                        if name not in table.personas:
-                            continue
-                        self.clear_table_locks(table, name, "leave")
-                        if departure.get("farewell", True):
-                            special_circumstance = f"you have decided to leave {table.name} for {destination}; as parting words before you depart,"
-                            self.personas[name].speak(table, special_circumstance)
-                        event_msg = departure.get("event_msg")
-                        if event_msg:
-                            table.add_table_event((name, None, event_msg, self.curr_time, set([name])))
-                        self.personas[name].scratch.curr_loc = destination
-                        self.room.locations[destination].incoming_arrivals.add((name, benefactor, table_name))
-                        del table.personas[name]
-                        spinster_reveal_target = departure.get("spinster_reveal_target")
-                        if spinster_reveal_target:
-                            self.personas[name].resolve_spinster_forced_reveal(table, spinster_reveal_target)
+                    for table_name, table in self.room.locations.items():
+                        table.current_events = []
+                        table.current_lines = []
+                    self.next_phase = "departure"
+                    self.save_checkpoint("timestep_complete")
+                    continue
 
-                    for persona_name, persona in table.personas.items():
-                        persona.update_knowledge(self.room)
-                        result = bid(persona, table)
-                        table_bidding_results[persona.name] = result
-
-                    final_table_results = [(name, points) for name, points in sorted(table_bidding_results.items(), key=lambda item: item[1], reverse=True)]
-                    if debug:
-                        debug_log(f"[BID-RESULT] t={self.curr_time} | table={table.name} | ranking={final_table_results}")
-
-                    if final_table_results:
-                        EPS = 1e-6
-                        top_score = final_table_results[0][1]
-                        if top_score < MIN_ACTION_BID_SCORE:
-                            eligible_speakers = [
-                                name for name, persona in table.personas.items()
-                                if persona.scratch.speaking_cooldown <= 0
-                            ]
-                            if debug:
-                                debug_log(
-                                    f"[LOW-BID-FALLBACK] t={self.curr_time} | table={table.name} | "
-                                    f"top_score={top_score} | threshold={MIN_ACTION_BID_SCORE} | "
-                                    f"eligible_speakers={eligible_speakers} | ranking={final_table_results}"
-                                )
-                            if eligible_speakers:
-                                fallback_speaker = random.choice(eligible_speakers)
-                                fallback_persona = table.personas[fallback_speaker]
-                                fallback_persona.scratch.act_reasoning = (
-                                    "no action bid was strong enough to force the table's attention"
-                                )
-                                fallback_persona.speak(table)
-                            else:
-                                act_desp = "The table falls quiet; no action bid is strong enough and everyone is still waiting for space to speak."
-                                table.add_table_event(("system", None, act_desp, self.curr_time, set(table.personas.keys())))
-                        else:
-                            top_candidates = [name for name, pts in final_table_results if abs(pts - top_score) <= EPS]
-
-                            winner = random.choice(top_candidates)
-                            if debug:
-                                debug_log(f"[ACTOR] t={self.curr_time} | table={table.name} | winner={winner} | top_score={top_score} | tied={top_candidates}")
-
-                            table.personas[winner].act(table)
-                            self.process_removal_targets(table, table_name, only_roles={"Spinster"})
-
-                    table.bishop_trigger = False
-
-                    self.process_removal_targets(table, table_name)
-
-                for table_name, table in self.room.locations.items():
-                    innkeeper = None
-                    innkeeper_source_table = None
-                    queen_followups = []
-                    incoming_arrivals = list(table.incoming_arrivals)
-                    random.shuffle(incoming_arrivals)
-                    for candidate, benefactor, source_table in incoming_arrivals:
-                        if table.lockdown_targets:
-                            self.clear_table_locks(table, candidate, "enter")
-                        self.sync_persona_to_table_history_end(self.personas[candidate], table_name)
-                        table.personas[candidate] = self.personas[candidate]
-                        act_desp = f"{candidate} arrives from {source_table}"
-                        arrival_event = (candidate, None, act_desp, self.personas[candidate].scratch.curr_time, set([candidate]))
-                        table.add_table_event(arrival_event)
-                        arriving_persona = self.personas[candidate]
-                        if (
-                            table.name == "Village"
-                            and arriving_persona.scratch.role == "Innkeeper"
-                            and "Innkeeper" in arriving_persona.scratch.cards_slot
-                            and (
-                                arriving_persona.scratch.ability_active
-                                or arriving_persona.decide_innkeeper_declaration(table, source_table)
-                            )
-                        ):
-                            arriving_persona.scratch.ability_active = True
-                            innkeeper = candidate
-                            innkeeper_source_table = source_table
-                        else:
-                            special_circumstance = self.arrival_speaking_context(
-                                arriving_persona,
-                                table.name,
-                                source_table,
-                                benefactor=benefactor,
-                            )
-                            arriving_persona.speak(table, special_circumstance)
-                        if benefactor:
-                            queen_followups.append((benefactor, candidate))
-                    for benefactor, candidate in queen_followups:
-                        if benefactor and benefactor in table.personas and table.personas[benefactor].scratch.role == "Queen":
-                            if self.add_lock_if_allowed(table, benefactor, candidate, "Queen"):
-                                table.personas[benefactor].scratch.ability_objects.append(candidate)
-                    if innkeeper:
-                        innkeeper = self.personas[innkeeper]
-                        innkeeper_announcement = self.arrival_speaking_context(
-                            innkeeper,
-                            table.name,
-                            innkeeper_source_table or "another table",
-                            base_context="you have just arrived here and are revealing your Innkeeper card to declare yourself as Innkeeper and lock down the Village",
-                        )
-                        innkeeper.speak(table, special_circumstance=innkeeper_announcement)
-
-                        for other_player_name, other_player in table.personas.items():
-                            if other_player_name != innkeeper.scratch.name:
-                                if self.add_lock_if_allowed(table, innkeeper.scratch.name, other_player_name, innkeeper.scratch.role):
-                                    innkeeper.scratch.ability_objects.append(other_player_name)
-
-                        act_desp = f"{innkeeper.scratch.name} reveals {innkeeper.role_card_text(role='Innkeeper')}, declares themself as Innkeeper, and locks down everyone at the Village"
-                        lockdown_event = (innkeeper.scratch.name, None, act_desp, self.curr_time, set([innkeeper.scratch.name] + innkeeper.scratch.ability_objects))
-                        table.add_table_event(lockdown_event)
-
-                    table.incoming_arrivals = set()
-
-                self.curr_time += datetime.timedelta(seconds=self.sec_per_step)
-                for persona_name, persona in self.personas.items():
-                    persona.scratch.curr_time = self.curr_time
-                    persona.scratch.movement_cooldown = max(0, persona.scratch.movement_cooldown - 1)
-                    persona.scratch.speaking_cooldown = max(0, persona.scratch.speaking_cooldown - 1)
-
-                for table_name, table in self.room.locations.items():
-                    table.current_events = []
-                    table.current_lines = []
-                self.save_checkpoint("timestep_complete")
+                self.next_phase = "departure"
+                self.save_checkpoint("unknown_phase_reset")
 
             self.append_results_to_dialogue_log(
                 "PRE-SPINSTER NET RESULTS",

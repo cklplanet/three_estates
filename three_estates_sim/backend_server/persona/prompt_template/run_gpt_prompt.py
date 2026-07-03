@@ -41,6 +41,42 @@ def text_cleanup(output):
   return output.strip()
 
 
+def movement_duration_hint():
+  return (
+    f"Physically moving from one table to another takes {2 * SIM_SECONDS_PER_STEP} seconds total (but the game timer having less than that left, even less than one second, STILL counts as you being able to make it to your final destination table 'in time', so that you WILL have a table in the end and won't be 'caught in transit'). \n"
+    f"If you stay here then you implicitly commit to staying for at least around {2 * MOVEMENT_STAY_COOLDOWN_STEPS * SIM_SECONDS_PER_STEP} more seconds; and if you move then you implicitly commit to staying at your destination for at least around {2 * MOVEMENT_LEAVE_COOLDOWN_STEPS * SIM_SECONDS_PER_STEP} seconds."
+  )
+
+
+def recent_thief_swap_warning(persona, table):
+  if persona.scratch.role != "Thief" or len(table.personas) != 2:
+    return ""
+  other_names = [name for name in table.personas.keys() if name != persona.scratch.name]
+  if not other_names:
+    return ""
+  other_name = other_names[0]
+  recent_texts = []
+  for _timestamp, nodes in persona.scratch.recent_conversation:
+    for node in nodes:
+      recent_texts.append(str(getattr(node, "description", "")))
+  for node in persona.a_mem.seq_event[-20:] + persona.a_mem.seq_chat[-20:]:
+    recent_texts.append(str(getattr(node, "description", "")))
+  for text in recent_texts:
+    lower = text.lower()
+    if (
+        "forcefully swap" in lower
+        and "thief" in lower
+        and persona.scratch.name.lower() in lower
+        and other_name.lower() in lower
+    ):
+      return (
+        f" Recent repeated Thief swap warning: you and {other_name} have already swapped recently. "
+        "Bid high only if swapping again changes something concrete: a win-condition route, who can move, who can use an ability, "
+        "who holds a relevant card, or what information the table gains. Otherwise, prefer speaking through the situation."
+      )
+  return ""
+
+
 def format_table_lockdown_status(table, persona_name=None, indent=""):
   if not table.lockdown_targets:
     return f"{indent}Current player-imposed lockdowns at this table: none.\n"
@@ -56,6 +92,42 @@ def format_table_lockdown_status(table, persona_name=None, indent=""):
       f"{indent}- {benefactor}'s {role} ability is keeping {target} from leaving this table.{self_note}\n"
     )
   return "".join(lines)
+
+
+def format_transit_status(room, curr_time, indent=""):
+  if not getattr(room, "transit", None):
+    return f"{indent}Players currently in transit between tables: none.\n"
+  lines = [f"{indent}Players currently in transit between tables; they have left their source table but have not arrived yet:\n"]
+  for name, data in sorted(room.transit.items()):
+    since = data.get("since", curr_time)
+    if hasattr(since, "total_seconds"):
+      time_ago = timedelta_to_natural(curr_time - since)
+    else:
+      time_ago = "some time"
+    benefactor = data.get("benefactor")
+    forced = f" due to {benefactor}'s ability" if benefactor else ""
+    lines.append(
+      f"{indent}- {name}: from {data.get('source')} toward {data.get('destination')}{forced}; departed {time_ago} ago.\n"
+    )
+  return "".join(lines)
+
+
+def build_stay_at_table_reason(persona, table, extra_reasons=None):
+  base = persona.scratch.current_movement_reasoning
+  if base:
+    reasons = [f"your intent for being at this table is: {base}"]
+  else:
+    reasons = ["you're staying at the table with no rush of going anywhere now"]
+
+  lockdown_matches = [t for t in table.lockdown_targets if t[1] == persona.scratch.name]
+  if lockdown_matches:
+    captors = ", ".join(f"{benefactor}'s {role}" for benefactor, _target, role in lockdown_matches)
+    reasons.append(f"you are currently forced to stay by {captors}")
+
+  for reason in extra_reasons or []:
+    if reason:
+      reasons.append(reason)
+  return "; and ".join(reasons)
 
 
 def run_gpt_prompt_generate_character(character_group_context, existing_character_choices, name_mode, test_input=None, verbose=False): 
@@ -229,6 +301,21 @@ def run_gpt_prompt_thought_poignancy(persona, thought_description, test_input=No
 
 def run_gpt_prompt_act_bidding_ability(persona, table, test_input=None, verbose=False): 
   data = get_bidding_common_data(persona, table)
+  if persona.scratch.role == "Innkeeper":
+    data["ability_bid_action_clarification"] = (
+      "For Innkeeper specifically, bidding for your ability here means bidding to leave your current table for the Village, "
+      "no matter where you currently are outside the Village. You are NOT required to reveal your role or card at the departure table; "
+      "the real Innkeeper reveal/declaration, if you choose to make it, happens only after you arrive at the Village."
+    )
+  else:
+    data["ability_bid_action_clarification"] = (
+      "For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, "
+      "how urgently you want to use your ability (and in the process reveal your role at everyone at your current table) to the conversation in particular. "
+      "For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first."
+    )
+  if persona.scratch.role in {"Queen", "Spinster"}:
+    data["ability_bid_action_clarification"] += f" Timing note for this movement-based ability: {movement_duration_hint()}"
+  data["ability_bid_action_clarification"] += recent_thief_swap_warning(persona, table)
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_ability.txt"
   prompt = read_prompt_template(prompt_template)
@@ -253,9 +340,23 @@ def run_gpt_prompt_act_bidding_reveal(persona, table, test_input=None, verbose=F
     return output, [output, prompt, data]
 
 
+def run_gpt_prompt_act_bidding_nun_reveal(persona, table, test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table)
+
+  prompt_template = "persona/prompt_template/templates/reaction_bidding_nun_reveal.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+
+  if output != False:
+    return output, [output, prompt, data]
+
+
 def get_bidding_common_data(persona, table):
   retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = persona.scratch.retrieved
   seen_context_descriptions = set()
+  seen_node_ids = set()
 
   def context_key(description):
     return " ".join(str(description or "").split())
@@ -270,14 +371,23 @@ def get_bidding_common_data(persona, table):
     seen_context_descriptions.update(keys)
     return True
 
+  def claim_node(node):
+    node_id = getattr(node, "node_id", None)
+    if not node_id:
+      return claim_context(getattr(node, "description", ""))
+    if node_id in seen_node_ids:
+      return False
+    seen_node_ids.add(node_id)
+    return True
+
   def format_memory_line(node, indent="", include_chat_table=False):
     time_ago = timedelta_to_natural(persona.scratch.curr_time - node.created)
     if node.type == "chat":
       table_text = f" at the {node.table} table" if include_chat_table else ""
-      return f"{indent}({time_ago} ago) {node.description}{table_text}\n"
+      return f"{indent}(past memory from {time_ago} ago; not necessarily the current board state) {node.description}{table_text}\n"
     if node.type == "thought":
-      return f"{indent}Past private thought from {time_ago} ago: {node.description}\n"
-    return f"{indent}({time_ago} ago) {node.description} at the {node.table} table\n"
+      return f"{indent}Past private thought from {time_ago} ago, not necessarily the current board state: {node.description}\n"
+    return f"{indent}(past memory from {time_ago} ago; not necessarily the current board state) {node.description} at the {node.table} table\n"
 
   recent_conversation = ""
   for timestamp_dict in persona.scratch.recent_conversation:
@@ -304,15 +414,16 @@ def get_bidding_common_data(persona, table):
   new_line = f"Players currently seated at your table, the {persona.scratch.curr_loc}:\n"      
   current_table_context += new_line
   current_table_context += format_table_lockdown_status(table, persona.scratch.name)
+  current_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
   for other_player, other_player_dict in dict.items():
     current_table_context += f"\t{other_player}\n"
     current_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
     for event in other_player_dict["events"]:
-      if claim_context(event.description):
+      if claim_node(event):
         current_table_context += format_memory_line(event, "\t\t")
     current_table_context += f"\tRelevant past thoughts about this player (memory only; not necessarily current board state):\n"
     for thought in other_player_dict["thoughts"]:
-      if claim_context(thought.description):
+      if claim_node(thought):
         current_table_context += format_memory_line(thought, "\t\t")
   personal_context_msg = persona.get_personal_game_context()
   if persona.scratch.curr_time == datetime.timedelta(0):
@@ -322,7 +433,7 @@ def get_bidding_common_data(persona, table):
   current_table_additional_lines = []
   for line, line_event_list in self_retrieved_lines_related.items():
     for event in line_event_list:
-      if claim_context(event.description):
+      if claim_node(event):
         current_table_additional_lines.append(format_memory_line(event, "\t"))
   current_table_additional_context = ""
   if current_table_additional_lines:
@@ -338,7 +449,7 @@ def get_bidding_common_data(persona, table):
         other_table_additional_lines.append(line_with_table_info.rstrip() + "\n")
       reminder_lines = []
       for event in event_list:
-        if claim_context(event.description):
+        if claim_node(event):
           reminder_lines.append(format_memory_line(event, "\t"))
       if reminder_lines:
         other_table_additional_lines.append("This also reminds you of past memories, not necessarily current board state:\n")
@@ -354,13 +465,13 @@ def get_bidding_common_data(persona, table):
   )
   total_time_left = timedelta_to_natural(game_end_time() - persona.scratch.curr_time)
       
-  lockdown_matches = [t for t in table.lockdown_targets if t[1] == persona.scratch.name]
-  if not lockdown_matches: # not under influence of abilities rn
-    stay_at_table_reason = "you're staying at the table with no rush of going anywhere now"
-  else:
-    captor_roles = [t[2] for t in lockdown_matches]
-    captor_roles = "'s and ".join(captor_roles)
-    stay_at_table_reason = f"you're forced to stay due to {captor_roles}'s abilities"
+  stay_at_table_reason = build_stay_at_table_reason(persona, table)
+  last_act_reasoning = f"your strongest bidding reasoning moments ago was: {persona.scratch.act_reasoning}  (though you CAN change your mind now and anytime)" if persona.scratch.act_reasoning else "you haven't really thought about doing anything yet"
+  ability_bid_action_clarification = (
+    "For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, "
+    "how urgently you want to use your ability (and in the process reveal your role at everyone at your current table) to the conversation in particular. "
+    "For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first."
+  )
 
   data = {
     "PREFIX": PREFIX,
@@ -372,6 +483,8 @@ def get_bidding_common_data(persona, table):
     "current_table_additional_context": current_table_additional_context,
     "other_table_additional_context": other_table_additional_context,
     "stay_at_table_reason": stay_at_table_reason,
+    "last_act_reasoning": last_act_reasoning,
+    "ability_bid_action_clarification": ability_bid_action_clarification,
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
@@ -413,6 +526,17 @@ def run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, test_
 def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_input=None, verbose=False): 
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
   external_table_context = ""
+  seen_node_ids = set()
+
+  def claim_node(node):
+    node_id = getattr(node, "node_id", None)
+    if not node_id:
+      return True
+    if node_id in seen_node_ids:
+      return False
+    seen_node_ids.add(node_id)
+    return True
+
   for table_name, dict in retrieved_all_tables.items():
     table_timer_left = table_leave_timer_status(table_name, persona.scratch.curr_time)
     new_line = f"Players currently seated at the {table_name} table ({table_timer_left}):"
@@ -425,14 +549,19 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
       external_table_context += f"\t{other_player}\n"
       external_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
       for event in other_player_dict["events"]:
+        if not claim_node(event):
+          continue
         time_ago = timedelta_to_natural(persona.scratch.curr_time - event.created)
         new_line = "\t\t"+ f"(past memory from {time_ago} ago; not necessarily current) " + event.description + f" at the {event.table} table\n"
         external_table_context += new_line
       external_table_context += f"\tRelevant past thoughts about this player (memory only; not necessarily current board state):\n"
       for thought in other_player_dict["thoughts"]:
+        if not claim_node(thought):
+          continue
         time_ago = timedelta_to_natural(persona.scratch.curr_time - thought.created)
         new_line = "\t\t"+ f"(past private thought from {time_ago} ago; not necessarily current) " + thought.description + "\n"
         external_table_context += new_line
+  external_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
   personal_context_msg = persona.get_personal_game_context()
   ability_msg = ability_trigger(persona, table)
 
@@ -466,6 +595,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "recent_conversation": recent_conversation,
     "current_table": current_table,
     "other_options": other_options,
+    "movement_duration_hint": movement_duration_hint(),
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
@@ -553,6 +683,37 @@ def run_gpt_prompt_guess_family_bishop(persona, target, table, test_input=None, 
   if output != False:
     if "guess" not in output and "target" in output:
       output["guess"] = output["target"]
+    return output, [output, prompt, data_sub]
+
+
+def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, table, test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table)
+  actual_family = ROLE_DICT[persona.scratch.role]["family"]
+  card_status = (
+    f"you have your {persona.scratch.role} card and can hard reveal it"
+    if persona.scratch.role in persona.scratch.cards_slot
+    else f"you do not currently have your {persona.scratch.role} card, so hard reveal is not available"
+  )
+  data_sub = {
+    "PREFIX": PREFIX,
+    "personal_context_msg": data["personal_context_msg"],
+    "current_table_context": data["current_table_context"],
+    "recent_conversation": data["recent_conversation"],
+    "current_table_events": data["current_table_events"],
+    "current_table_additional_context": data["current_table_additional_context"],
+    "other_table_additional_context": data["other_table_additional_context"],
+    "bishop_name": bishop.scratch.name,
+    "guessed_family": guessed_family,
+    "actual_role": persona.scratch.role,
+    "actual_family": actual_family,
+    "card_status": card_status,
+  }
+  prompt_template = "persona/prompt_template/templates/bishop_wrong_guess_response.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data_sub)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  if output != False:
     return output, [output, prompt, data_sub]
 
 
@@ -648,10 +809,16 @@ def run_gpt_prompt_decide_movement_ability_use(persona, table, destination, move
       "and force that player to follow you to the new table."
     )
   elif role == "Spinster":
-    ability_description = (
-      "As Spinster, when you leave the Forest you may reveal your Spinster card, point to one player still in the Forest, "
-      "and force that player to reveal their role card to the Forest after you leave."
-    )
+    if table.name == "Village":
+      ability_description = (
+        "As a special Bishop-exile edge case, when you are forced to leave the Village you may reveal your Spinster card, "
+        "point to one player still in the Village, and force that player to reveal their role card to the Village after you leave."
+      )
+    else:
+      ability_description = (
+        "As Spinster, when you leave the Forest you may reveal your Spinster card, point to one player still in the Forest, "
+        "and force that player to reveal their role card to the Forest after you leave."
+      )
   else:
     ability_description = "This role does not have a movement-triggered ability."
   target_options = ", ".join(list(set(table.personas.keys()) - {persona.scratch.name}))
@@ -665,6 +832,7 @@ def run_gpt_prompt_decide_movement_ability_use(persona, table, destination, move
     "other_table_additional_context": data["other_table_additional_context"],
     "table_time_left": data["table_time_left"],
     "total_time_left": data["total_time_left"],
+    "movement_duration_hint": movement_duration_hint(),
     "role": role,
     "destination": destination,
     "movement_reasoning": movement_reasoning or "I did not have a detailed movement reason recorded.",
@@ -685,6 +853,17 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
 , test_input=None, verbose=False): 
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
   external_table_context = ""
+  seen_node_ids = set()
+
+  def claim_node(node):
+    node_id = getattr(node, "node_id", None)
+    if not node_id:
+      return True
+    if node_id in seen_node_ids:
+      return False
+    seen_node_ids.add(node_id)
+    return True
+
   for table_name, dict in retrieved_all_tables.items():
     new_line = f"Players currently seated at the {table_name} table:"      
     if persona.scratch.curr_loc == table_name:
@@ -696,14 +875,19 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
       external_table_context += f"\t{other_player}\n"
       external_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
       for event in other_player_dict["events"]:
+        if not claim_node(event):
+          continue
         time_ago = timedelta_to_natural(persona.scratch.curr_time - event.created)
         new_line = "\t\t"+ f"(past memory from {time_ago} ago; not necessarily current) " + event.description + f" at the {event.table} table\n"
         external_table_context += new_line
       external_table_context += f"\tRelevant past thoughts about this player (memory only; not necessarily current board state):\n"
       for thought in other_player_dict["thoughts"]:
+        if not claim_node(thought):
+          continue
         time_ago = timedelta_to_natural(persona.scratch.curr_time - thought.created)
         new_line = "\t\t"+ f"(past private thought from {time_ago} ago; not necessarily current) " + thought.description + "\n"
         external_table_context += new_line
+  external_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
   personal_context_msg = persona.get_personal_game_context()
   ability_msg = ability_trigger(persona, table)
   ability_departure_reasoning = (persona.scratch.current_bidding_reasonings or {}).get("ability", "")
@@ -764,16 +948,15 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
 def run_gpt_prompt_decide_card_retrieval(persona, table, object, test_input=None, verbose=False): 
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
   data = get_bidding_common_data(persona, table)
-  stay_at_table_reason = ""
   if (
       persona.scratch.role == "Nun"
       and persona.scratch.ability_objects
       and object == persona.scratch.ability_objects[0]
   ):
-    stay_at_table_reason = f"you're the Nun and your card and ability is currently possessed by and protecting {object}"
+    extra_reason = f"you're the Nun and your card and ability is currently possessed by and protecting {object}"
   else: # Baron case
-    stay_at_table_reason = f"your card is in the Baron {object}'s hands and now due to there being only two people at the table you can ask for it back"
-  data["stay_at_table_reason"] = stay_at_table_reason
+    extra_reason = f"your card is in the Baron {object}'s hands and now due to there being only two people at the table you can ask for it back"
+  data["stay_at_table_reason"] = build_stay_at_table_reason(persona, table, [extra_reason])
   prompt_template = "persona/prompt_template/templates/decide_card_retrieval.txt"
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)

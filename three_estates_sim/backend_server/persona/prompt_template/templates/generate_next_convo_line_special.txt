@@ -36,6 +36,7 @@ Natural action-line discipline:
 - Do not address more than one named person unless the action directly involves multiple people; or you're directly making a last-minute verbal strategy to the table.
 - Do not summarize the whole table state.
 - Say what someone would plausibly say while moving, revealing, reacting, or being pressured (or in case of arriving at a table, any announcements you may or may not want to make).
+- Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
 - Emotion, implication, and subtext are better than explanation.
 
 

@@ -12,5 +12,6 @@ Format each line as either:
 - *Third-person rumination, movement, internal narration, or room atmosphere*
 
 Tone: relatively literary but casual (BUT can differ wildly in length etc depending on the actual characters present, if the character is fictional then make them as in-character as possible), like a late-night post-game room where people are decompressing, teasing each other, processing betrayals, joking, or drifting into unrelated conversation. It can discuss the game, the results, role reveals, mistaken reads, grudges, alliances, or literally anything else that feels natural after the game.
+Also, if any several of the characters share a setting (whether real life or fiction source material, whatever applies) you can consider throwing in (whether mentions or even PHYSICALLY appearing and talking) other characters outside the roster related to those shared setting(s) in to spice things up.
 
 Keep each line readable and not too long. Do not use JSON. Do not number the lines. Do not add headings. Do not explain the format.

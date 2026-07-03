@@ -16,6 +16,7 @@ The conversations you have participated in so far for the last several minutes h
 
 Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be wanting to prepare to retrieve your card (or create the corresponding conditions for doing so), retrieving intel one table or another, leveraging Spinster location, or strategically breaking a move lock currently on your or another table, etc.. You should typically only choose to leave for another one when you have decided for now you can obtain more information elsewhere or would be safer than at the current table 
 You can either stay at your current table {current_table} or move to either of the other two tables: {other_options}.
+Movement timing note: {movement_duration_hint}
 Current table leave timer status: {table_time_left}
 There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:

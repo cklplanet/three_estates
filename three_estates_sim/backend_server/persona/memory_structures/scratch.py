@@ -21,9 +21,9 @@ class Scratch:
   def __init__(self, role, f_saved=False): 
     # PERSONA HYPERPARAMETERS
     # <att_bandwidth>
-    self.att_bandwidth = 3
+    self.att_bandwidth = SCRATCH_ATTENTION_BANDWIDTH
     # <retention>
-    self.retention = 10
+    self.retention = SCRATCH_RETENTION_BATCHES
 
     # WORLD INFORMATION
     # Perceived world time. 
@@ -48,7 +48,7 @@ class Scratch:
     self.importance_w = 1
     self.importance_ele_n = 0
     self.recency_decay = 0.99
-    self.importance_trigger_max = 150
+    self.importance_trigger_max = SCRATCH_IMPORTANCE_TRIGGER_MAX
     self.importance_trigger_curr = self.importance_trigger_max
 
     # RELEVANT TO OUR GAME
