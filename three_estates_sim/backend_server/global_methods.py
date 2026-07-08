@@ -46,9 +46,25 @@ def get_other_player_context(table, persona):
 
 def ability_trigger(persona, table):
     trigger_message = ""
+    role = persona.scratch.role
+    table_size = len(table.personas.keys())
+
+    def king_locked_family_text():
+        families = set()
+        for benefactor, target_name, lock_role in table.lockdown_targets:
+            if benefactor != persona.scratch.name or lock_role != "King":
+                continue
+            if target_name in table.personas:
+                families.add(ROLE_DICT[table.personas[target_name].scratch.role]["family"])
+        if not families:
+            return "the targeted family or families at this table"
+        return ", ".join(sorted(families))
+
     if persona.scratch.role in persona.scratch.cards_slot: # Prerequisite: your card is still with you
         if len(table.personas.keys()) == 2: # those that require one-on-one triggers
-            if persona.scratch.role == "Nun" or persona.scratch.role == "Thief" or persona.scratch.role == "Priest":
+            if persona.scratch.role in {"Nun", "Priest"}:
+                trigger_message = "Since you're alone with another player now, you have the option to stay and trigger your ability.\n"
+            elif persona.scratch.role == "Thief" and not thief_reverse_swap_locked(table, persona.scratch.name):
                 trigger_message = "Since you're alone with another player now, you have the option to stay and trigger your ability.\n"
         if persona.scratch.role == "Spinster":
             if persona.scratch.curr_loc == "Forest":
@@ -61,8 +77,8 @@ def ability_trigger(persona, table):
                 trigger_message = f"Reminder that you're currently holding {ability_objects} hostage and if you leave for another table your lock on {ability_objects} will automatically break.\n"
         elif persona.scratch.role == "King":
             if persona.scratch.ability_active == True:
-                ability_objects = ", ".join(persona.scratch.ability_objects)
-                trigger_message = f"Reminder that you're currently holding {ability_objects} hostage and if you leave for another table your lock on {ability_objects} will automatically break.\n"
+                locked_families = king_locked_family_text()
+                trigger_message = f"Reminder that your King lockdown is currently holding {locked_families} hostage, and if you leave for another table your lock on {locked_families} will automatically break.\n"
         elif persona.scratch.role == "Bishop":
             if table.bishop_trigger == True:
                 trigger_message = f"Since at least one player has just made their departure, you have the option to stay and trigger your ability.\n"
@@ -75,6 +91,36 @@ def ability_trigger(persona, table):
             else:
                 ability_objects = ", ".join(persona.scratch.ability_objects)
                 trigger_message = f"Reminder that you're currently holding {ability_objects} hostage and if you leave for another table your lock on {ability_objects} will automatically break.\n"
+
+    if not trigger_message and role != "Innkeeper":
+        if role not in persona.scratch.cards_slot:
+            trigger_message = f"Your {role} ability is not currently available because you do not have your {role} card.\n"
+        elif role in {"Nun", "Thief", "Priest"}:
+            if role == "Thief" and thief_reverse_swap_locked(table, persona.scratch.name):
+                trigger_message = "The condition for your Thief ability is not currently met: this exact two-player swap cannot be immediately reversed until the table state changes, such as either of you leaving or someone else arriving.\n"
+            else:
+                trigger_message = f"The condition for your {role} ability is not currently met: it only works when you are sitting with exactly one other player.\n"
+        elif role == "Spinster":
+            if persona.scratch.curr_loc != "Forest":
+                trigger_message = "The condition for your Spinster ability is not currently met: it only works when you leave the Forest.\n"
+            elif table.timer_expired:
+                trigger_message = "The condition for your Spinster ability is not currently met: the Forest timer has expired, so you cannot leave normally to trigger it.\n"
+            elif table_size <= 1:
+                trigger_message = "The condition for your Spinster ability is not currently met: there is no other player in the Forest to mark.\n"
+        elif role == "Queen":
+            if table.timer_expired:
+                trigger_message = "The condition for your Queen ability is not currently met: your table timer has expired, so you cannot leave normally to trigger it.\n"
+            elif table_size <= 1:
+                trigger_message = "The condition for your Queen ability is not currently met: there is no other player here to make follow you.\n"
+        elif role == "Bishop":
+            trigger_message = "The condition for your Bishop ability is not currently met: nobody has just left your table recently enough for you to react to.\n"
+        elif role == "King":
+            if table_size <= 1:
+                trigger_message = "The condition for your King ability is not currently useful: there are no other players here to lock down.\n"
+        elif role == "Baron":
+            trigger_message = "Your Baron ability is not a normal voluntary action right now; it can only trigger as a reaction when another player at your table shows a card while there are at least two other players at the table.\n"
+        elif role == "Farmer":
+            trigger_message = "Your Farmer ability is passive protection, so there is no voluntary ability to trigger right now.\n"
 
     return trigger_message
 

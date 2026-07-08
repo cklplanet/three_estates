@@ -1,22 +1,23 @@
 {PREFIX}
 {personal_context_msg}
 
-You are creating ONE private thought about the whole board. This thought should help you remember the current strategic state of the game, not produce separate notes for each question.
+You are creating ONE private thought about the whole board. This thought should help you remember what is known, claimed, or suspected about other players' hidden game roles, families, card status, and interpersonal alignments.
 
 Your prior board-state thoughts:
 {prior_thought_details}
 
-Retrieved evidence, organized by board-level and persona-specific focal questions:
+Retrieved evidence, organized by board-level and persona-specific role/status/alignment questions:
 {focal_retrieval_details}
 
 Write a compact but information-dense board-state thought from your point of view. Focus on:
-- what can be observed, confirmed, or reasonably suspected about each persona's current win condition and how close they are to fulfilling it
-- how trustworthy are those personas
-- what role/family/card-status evidence matters for those win conditions
-- which alliances, rivalries, bargains, coercive relationships, or hidden partnerships seem open or likely
-- how these relationships and win-condition pressures might affect your future choices
+- each other player's confirmed role/family if card-backed
+- each other player's claimed role/family if verbal only
+- each other player's suspected role/family if inferred
+- whether each other player appears to have their own role card, lacks it, or may hold another card
+- contradictions between card-backed reveals, soft claims, and guesses
+- alliances, rivalries, bargains, coercion, protection promises, threats, or trust patterns
 
-Separate confirmed facts from guesses. Do not invent certainty. Use "I" and "me" naturally because this is your private thought.
+Do NOT discuss current locations, table movement, win-condition progress, personality, or general strategy unless it directly changes a role/family/card-status/alignment inference. Separate confirmed facts from guesses. Do not invent certainty. Use "I" and "me" naturally because this is your private thought.
 
 Return ONLY the JSON dict below, in proper JSON format, with exactly these fields and no additional comments:
 

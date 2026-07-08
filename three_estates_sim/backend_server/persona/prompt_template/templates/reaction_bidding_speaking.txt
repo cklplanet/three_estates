@@ -3,12 +3,6 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-All information you can recall regarding to your current table:
-
-- {current_table_context}
-
-Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
-
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
@@ -17,24 +11,32 @@ The conversations you have participated in so far for the last several minutes h
 
 {other_table_additional_context}
 
+Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
+
+Current seating, lockdowns, and board context immediately before deciding:
+{current_table_context}
+
 Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
 - Speak truthfully, misleadingly (for example claiming you or others are of a certain role/family without revealing your card and proving it, same goes for claiming you're protected by Nun without proving), strategically, questioningly (esp about others' claims), or just casually
 - Reveal your card
 - React to others' actions or provocations
 {ability_msg}
 
-For this prompt in particular, you want to for now decide how urgently you want to respond ONLY verbally to the conversation in particular without factoring the need for other actions. For the chance to speak you will place a bid. Highest bidder speaks or acts first.
+For this prompt in particular, you want to for now decide how urgently you want to respond ONLY verbally, as in, if you were not to plan to use abilities or reveals (or other forms of irreversible acts such as explicit requests of retrieve Nun card) for now, to the conversation in particular. For the chance to speak you will place a bid. Highest bidder speaks or acts first.
+Optionally, you can weaponize the fact that voices at "practically screaming" - NOT just "loud" - volume CAN be potentially heard by other tables (and players transiting in between) in all of the ways above. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+
 - BID OPTIONS:
   0: I would like to lay low, observe and listen for now; or I have better things to do than merely speaking; or the last spoken line was literally from me and I would rather others respond instead.
   1: I have some general thoughts to share with the group, maybe even just chat and chill for the sake of it.
   2: I have something critical and specific to contribute to this discussion, including fishing for information.
-  3: It is absolutely urgent for me to speak next due to need for information (asking for soft or hard reveals, etc.), deflection, or dealing with my own or others' win conditions.
-  4: Someone has addressed me directly and I must respond, either by speaking truthfully, lying, or attempting to rhetorically overpower. That or I just REALLY want to throw in a snarky comment.
+  3: It is urgent for me to speak next due to need for information (asking for soft or hard reveals, etc.), deflection, or dealing with my own or others' win conditions.
+  4: Merely speaking or responding here is absolutely more preferable than a hard reveal or ability use, especially when someone has addressed me and I have to respond - either by speaking truthfully, lying, or attempting to rhetorically overpower. That or I just REALLY want to throw in a snarky comment.
+- Also note that immediately following up if the last dialogue at the table was you is not strictly discouraged.
+
 - Current table leave timer status: {table_time_left}
 - There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
 {all_table_time_left}
-
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 

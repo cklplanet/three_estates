@@ -11,15 +11,15 @@ Players at your final table that you must guess:
 Valid role guesses are exactly:
 {role_options}
 
-All information you can recall regarding your final table:
-{current_table_context}
-
 The conversations you have participated in recently:
 {recent_conversation}
 
 {current_table_events}
 {current_table_additional_context}
 {other_table_additional_context}
+
+Current final-table seating and board context immediately before guessing:
+{current_table_context}
 
 Choose exactly one valid role for every listed player. Do not include yourself in the guesses. If uncertain, make the best strategic guess from memory, claims, card-backed reveals, ability events, alliances, and win-condition behavior.
 

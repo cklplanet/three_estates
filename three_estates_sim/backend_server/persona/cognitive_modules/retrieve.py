@@ -4,6 +4,7 @@ File: retrieve.py
 Description: This defines the "Retrieve" module for generative agents. 
 """
 import sys
+import datetime
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
@@ -21,6 +22,49 @@ def strictly_past_nodes(persona, nodes):
     return sorted(filtered, key=lambda node: (node.created, node.node_count), reverse=True)
 
 
+def capped_past_nodes(persona, nodes, cap):
+    past_nodes = strictly_past_nodes(persona, nodes)
+    if cap is None or cap <= 0:
+        return past_nodes
+    return past_nodes[:cap]
+
+
+def node_recency_key(node):
+    created = getattr(node, "created", None)
+    last_accessed = getattr(node, "last_accessed", None)
+    node_count = getattr(node, "node_count", 0)
+    return (
+        created or datetime.timedelta(0),
+        last_accessed or created or datetime.timedelta(0),
+        node_count,
+    )
+
+
+def cap_table_retrieval_bucket(table_bucket, node_type, cap):
+    if cap is None or cap <= 0:
+        return
+    node_entries = []
+    seen_ids = set()
+    for persona_name, memory_dict in table_bucket.items():
+        for node in memory_dict.get(node_type, []):
+            node_id = getattr(node, "node_id", None)
+            dedupe_key = node_id or id(node)
+            if dedupe_key in seen_ids:
+                continue
+            seen_ids.add(dedupe_key)
+            node_entries.append((persona_name, node))
+    node_entries = sorted(node_entries, key=lambda entry: node_recency_key(entry[1]), reverse=True)
+    allowed = {
+        getattr(node, "node_id", None) or id(node)
+        for _persona_name, node in node_entries[:cap]
+    }
+    for memory_dict in table_bucket.values():
+        memory_dict[node_type] = [
+            node for node in memory_dict.get(node_type, [])
+            if (getattr(node, "node_id", None) or id(node)) in allowed
+        ]
+
+
 def retrieve(persona, room, self_table_perceived, other_tables_perceived): 
     retrieved_self = dict()
     retrieved_others = dict()
@@ -28,11 +72,17 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
     other_retrieved_lines_related = dict()
 
     def filter_nonoverlapping_chat(chat_dict, existing_events, existing_thoughts):
-        all_existing_ids = {e.node_id for e in existing_events}.union(
-                           {t.node_id for t in existing_thoughts})
+        all_existing_ids = {
+            node.node_id
+            for node in list(existing_events) + list(existing_thoughts)
+            if getattr(node, "node_id", None) is not None
+        }
         filtered_chat = {}
         for k, vlist in chat_dict.items():
-            filtered_vlist = [node for node in vlist if node.node_id not in all_existing_ids]
+            filtered_vlist = [
+                node for node in vlist
+                if getattr(node, "node_id", None) not in all_existing_ids
+            ]
             if filtered_vlist:
                 filtered_chat[k] = filtered_vlist
         return filtered_chat
@@ -41,13 +91,15 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
         retrieved_self[event.description] = dict()
         retrieved_self[event.description]["curr_event"] = event
 
-        relevant_events = strictly_past_nodes(
+        relevant_events = capped_past_nodes(
             persona,
-            persona.a_mem.retrieve_relevant_events(event.subject, event.object)
+            persona.a_mem.retrieve_relevant_events(event.subject, event.object),
+            RETRIEVED_SELF_EVENT_CAP
         )
-        relevant_thoughts = strictly_past_nodes(
+        relevant_thoughts = capped_past_nodes(
             persona,
-            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object),
+            RETRIEVED_SELF_THOUGHT_CAP
         )
 
         retrieved_self[event.description]["events"] = list(relevant_events)
@@ -64,13 +116,15 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
         retrieved_others[event.description] = dict()
         retrieved_others[event.description]["curr_event"] = event
 
-        relevant_events = strictly_past_nodes(
+        relevant_events = capped_past_nodes(
             persona,
-            persona.a_mem.retrieve_relevant_events(event.subject, event.object)
+            persona.a_mem.retrieve_relevant_events(event.subject, event.object),
+            RETRIEVED_OTHER_TABLE_EVENT_CAP
         )
-        relevant_thoughts = strictly_past_nodes(
+        relevant_thoughts = capped_past_nodes(
             persona,
-            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object)
+            persona.a_mem.retrieve_relevant_thoughts(event.subject, event.object),
+            RETRIEVED_OTHER_TABLE_THOUGHT_CAP
         )
 
         retrieved_others[event.description]["events"] = list(relevant_events)
@@ -78,13 +132,15 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
 
         if event.type == "chat":
             new_chat = new_retrieve(persona, [event.description], 4)
-            event_list = next(iter(new_chat.values()))
+            filtered_chat = filter_nonoverlapping_chat(new_chat, relevant_events, relevant_thoughts)
+            event_list = next(iter(filtered_chat.values()), [])
             new_chat_dict = {(f"(From table {event.table}) " + event.description): event_list}
             other_retrieved_lines_related.update(new_chat_dict)
 
     retrieved_all_tables = dict()
     for table_name, table in room.locations.items():
         retrieved_all_tables[table_name] = dict()
+        same_table = table_name == persona.scratch.curr_loc
         for persona_name in table.personas:
             retrieved_all_tables[table_name][persona_name] = {
                 "events": [],
@@ -93,12 +149,34 @@ def retrieve(persona, room, self_table_perceived, other_tables_perceived):
             relevant_events = set()
             relevant_events.update(persona.a_mem.retrieve_relevant_events(persona_name, None))
             relevant_events.update(persona.a_mem.retrieve_relevant_events(None, persona_name))
-            retrieved_all_tables[table_name][persona_name]["events"] += strictly_past_nodes(persona, relevant_events)
+            retrieved_all_tables[table_name][persona_name]["events"] += capped_past_nodes(persona, relevant_events, None)
 
             relevant_thoughts = set()
             relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(persona_name, None))
             relevant_thoughts.update(persona.a_mem.retrieve_relevant_thoughts(None, persona_name))
-            retrieved_all_tables[table_name][persona_name]["thoughts"] += strictly_past_nodes(persona, relevant_thoughts)
+            retrieved_all_tables[table_name][persona_name]["thoughts"] += capped_past_nodes(persona, relevant_thoughts, None)
+        if same_table:
+            cap_table_retrieval_bucket(
+                retrieved_all_tables[table_name],
+                "events",
+                RETRIEVED_CURRENT_TABLE_EVENT_TOTAL_CAP,
+            )
+            cap_table_retrieval_bucket(
+                retrieved_all_tables[table_name],
+                "thoughts",
+                RETRIEVED_CURRENT_TABLE_THOUGHT_TOTAL_CAP,
+            )
+        else:
+            cap_table_retrieval_bucket(
+                retrieved_all_tables[table_name],
+                "events",
+                RETRIEVED_FOREIGN_TABLE_EVENT_TOTAL_CAP,
+            )
+            cap_table_retrieval_bucket(
+                retrieved_all_tables[table_name],
+                "thoughts",
+                RETRIEVED_FOREIGN_TABLE_THOUGHT_TOTAL_CAP,
+            )
     #retrieved_self format: {description: {"curr_event": event node, "events": list of event nodes, "thoughts": list of event nodes}}
     #retrieved_lines_related: {line_content: list of event nodes, line_2_content: list of event nodes, etc.}
     #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
@@ -327,9 +405,22 @@ def new_retrieve(persona, focal_points, n_count=30):
     master_nodes = [persona.a_mem.id_to_node[key] 
                     for key in list(master_out.keys())]
 
-    for n in master_nodes: 
-      n.last_accessed = persona.scratch.curr_time
-      
     retrieved_self[focal_pt] = master_nodes
+
+  seen_node_ids = set()
+  for focal_pt in focal_points:
+    deduped_nodes = []
+    for node in retrieved_self.get(focal_pt, []):
+      node_id = getattr(node, "node_id", None)
+      if node_id in seen_node_ids:
+        continue
+      if node_id is not None:
+        seen_node_ids.add(node_id)
+      deduped_nodes.append(node)
+    retrieved_self[focal_pt] = deduped_nodes
+
+  for nodes in retrieved_self.values():
+    for node in nodes:
+      node.last_accessed = persona.scratch.curr_time
 
   return retrieved_self

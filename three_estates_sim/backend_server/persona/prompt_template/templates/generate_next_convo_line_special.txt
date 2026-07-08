@@ -3,12 +3,6 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-At this moment, all information you just happen to recall regarding to your current table are:
-
-- {current_table_context}
-
-Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
-
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
@@ -22,13 +16,18 @@ There are {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
 {all_table_time_left}
 
+Temporal rule: the player seating list is current. Retrieved past events/thoughts are memories only and may no longer describe the current board state.
+
+Current seating, lockdowns, and board context immediately before this action line:
+{current_table_context}
+
 Given that {special_circumstance}, please decide exactly what you want to say IMMEDIATELY to accompany your move. Depending on what your personality is inclined towards, you may potentially, among other choices: 
 - Be neutral, analytical, or earnest
 - Be smug
 - Convey whatever immediate emotions you have, surprise, anger, dread, joy, etc
 - Be threatening or accusatory
 - Or be laconic and cryptic
-- Additionally, you can weaponize the fact that voices at "practically screaming" - not just "loud" - volume CAN be potentially heard by other tables (and players transiting in between). Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+- Additionally, you can weaponize the fact that voices at "practically screaming" - NOT just "loud" - volume CAN be potentially heard by other tables (and players transiting in between). Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
 
 Natural action-line discipline:
 - This is an accompanying line, not a speech.

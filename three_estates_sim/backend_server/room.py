@@ -22,6 +22,7 @@ class Location:
         self.removal_targets = set() # format: (sub, obj, subj_role, target_table)
         self.lockdown_targets = set() # format: (sub, obj, subj_role)
         self.incoming_arrivals = set() # format: (self, "benefactor"(optional), source_table)
+        self.thief_swap_locks = set() # format: frozenset({player_a, player_b}); cleared on table-state change
         self.bishop_trigger = False
         self.spinster_marked = None
         self.timer_expired = False
@@ -38,12 +39,7 @@ class Location:
     
     def add_table_event(self, event_tuple):
         subject, obj, description, timestamp, keywords = event_tuple
-        keywords = set(keywords or []) | role_keywords_from_text(description)
-        for player_name in list(keywords) + [subject, obj]:
-            if player_name in self.personas:
-                role = self.personas[player_name].scratch.role
-                keywords.add(role)
-                keywords.add(role_family(role))
+        keywords = set(keywords or []) | event_role_keywords_from_text(description)
         event_tuple = (subject, obj, description, timestamp, keywords)
         self.current_events.append(event_tuple)
         self.event_history.append(event_tuple)
@@ -58,11 +54,6 @@ class Location:
             dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
         speaker, target, volume, line, timestamp, audience, keywords = dialogue_tuple
         keywords = set(keywords or []) | role_keywords_from_text(line)
-        for player_name in set(audience or []) | {speaker, target}:
-            if player_name in self.personas:
-                role = self.personas[player_name].scratch.role
-                keywords.add(role)
-                keywords.add(role_family(role))
         dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
         self.current_lines.append(dialogue_tuple)
         self.dialogue_history.append(dialogue_tuple)
@@ -76,6 +67,7 @@ class RoomGraph:
         self.personas = personas
         self.transit = dict()  # persona_name -> {source, destination, benefactor, since}
         self.audible_dialogue_limits = dict()
+        self.endgame_mode = False
         edges = [
             ("Forest", "Castle"),
             ("Castle", "Village"),
