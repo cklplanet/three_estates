@@ -64,6 +64,7 @@ class Scratch:
     self.ability_active = False
     self.nun_protected = False # separate flag needed for this to distinguish between baron-steal and this
     self.ability_objects = []
+    self.ability_locations = set()
     self.retrieved = None
     self.act_reasoning = None
     self.relationships = dict()
@@ -74,6 +75,7 @@ class Scratch:
     self.overheard_dialogue_cursors = dict()
     self.event_cursors = dict()
     self.endgame_role_guesses = dict()
+    self.arrival_overheard_context = []
 
 
 
@@ -116,6 +118,7 @@ class Scratch:
         self.ability_active = scratch_load["ability_active"]
         self.nun_protected = scratch_load["nun_protected"]
         self.ability_objects = scratch_load["ability_objects"]
+        self.ability_locations = set(scratch_load.get("ability_locations", self.ability_locations))
         self.retrieved = scratch_load["retrieved"]
         self.act_reasoning = scratch_load["act_reasoning"]
         self.relationships = scratch_load["relationships"]
@@ -126,6 +129,7 @@ class Scratch:
         self.overheard_dialogue_cursors = scratch_load.get("overheard_dialogue_cursors", self.overheard_dialogue_cursors)
         self.event_cursors = scratch_load.get("event_cursors", self.event_cursors)
         self.endgame_role_guesses = scratch_load.get("endgame_role_guesses", self.endgame_role_guesses)
+        self.arrival_overheard_context = []
 
 
   def save(self, out_json):
@@ -158,6 +162,7 @@ class Scratch:
     scratch["ability_active"] = self.ability_active
     scratch["nun_protected"] = self.nun_protected
     scratch["ability_objects"] = self.ability_objects
+    scratch["ability_locations"] = sorted(self.ability_locations)
     scratch["retrieved"] = None
     scratch["act_reasoning"] = self.act_reasoning
     scratch["relationships"] = self.relationships

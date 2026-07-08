@@ -3,16 +3,16 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
-- All information across all tables that you currently remember:
-{external_table_context}
-
-Important temporal rule: the "currently seated" lists are the current visible board state. Any "relevant past events/thoughts" listed under a player are memories from before now and may no longer describe where that player is, what they hold, or what the current board state is.
-
 {ability_msg}
 
 
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
+
+Important temporal rule: the "currently seated" lists are the current visible board state. Any "relevant past events/thoughts" listed under a player are memories from before now and may no longer describe where that player is, what they hold, or what the current board state is.
+
+Current seating, lockdowns, transit state, and any endgame board context immediately before choosing destination:
+{external_table_context}
 
 Given that you now have to leave this table because {special_circumstance}, you must now move to either of the other two tables: {other_options}. Please decide which of the two you should leave for.
 {ability_departure_reasoning}

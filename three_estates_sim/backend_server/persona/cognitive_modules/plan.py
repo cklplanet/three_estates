@@ -79,21 +79,20 @@ def bid(persona, table):
       {"reasoning": "I will not spend the table's attention retrieving a card right now.", "bid": "0"}
     )
     persona.scratch.current_bidding_reasonings['retrieve'] = retrieve_bid_dict["reasoning"]
-    retrieve_bid = bounded_int(retrieve_bid_dict["bid"], 0, allowed={0, 3, 8})
+    retrieve_bid = bounded_int(retrieve_bid_dict["bid"], 0)
     persona.scratch.current_bidding_scores['retrieve'] = retrieve_bid
     debug_bid(persona, table, "retrieve", retrieve_bid, retrieve_bid_dict["reasoning"])
   # Check conditions for ability being allowed
   if role in persona.scratch.cards_slot:
     if (
-        (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or
-        (
-          table_size > 1 and (
-            (role == "Bishop" and table.bishop_trigger) or
-            (role in {"Priest", "Thief", "Nun"} and table_size == 2) or
-            (role == "Spinster" and table.name == "Forest" and not table.timer_expired) or
-            (role == "King") or
-            (role == "Queen" and not table.timer_expired)
-          )
+        table_size > 1 and (
+          (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or
+          (role == "Bishop" and table.bishop_trigger) or
+          (role in {"Priest", "Nun"} and table_size == 2) or
+          (role == "Thief" and table_size == 2 and not thief_reverse_swap_locked(table, persona.scratch.name)) or
+          (role == "Spinster" and table.name == "Forest" and not table.timer_expired) or
+          (role == "King") or
+          (role == "Queen" and not table.timer_expired)
         )
     ):
         # If conditions are satisfied, allow ability bidding
@@ -102,7 +101,7 @@ def bid(persona, table):
           {"reasoning": "I do not have a clear ability play right now.", "bid": "0"}
         )
         persona.scratch.current_bidding_reasonings['ability'] = ability_bid_dict["reasoning"]
-        ability_bid = bounded_int(ability_bid_dict["bid"], 0, allowed={0, 1, 3, 5, 7})
+        ability_bid = bounded_int(ability_bid_dict["bid"], 0)
         ability_bid = ABILITY_MULTIPLIER * ability_bid
         persona.scratch.current_bidding_scores['ability'] = ability_bid
         debug_bid(persona, table, "ability", ability_bid, ability_bid_dict["reasoning"])
@@ -112,7 +111,7 @@ def bid(persona, table):
       {"reasoning": "I do not need to show the Nun card protecting me right now.", "bid": "0"}
     )
     persona.scratch.current_bidding_reasonings['nun-reveal'] = nun_reveal_bid_dict["reasoning"]
-    nun_reveal_bid = bounded_int(nun_reveal_bid_dict["bid"], 0, allowed={0, 1, 3, 5})
+    nun_reveal_bid = bounded_int(nun_reveal_bid_dict["bid"], 0)
     persona.scratch.current_bidding_scores['nun-reveal'] = nun_reveal_bid
     debug_bid(persona, table, "nun-reveal", nun_reveal_bid, nun_reveal_bid_dict["reasoning"])
   if role not in persona.scratch.cards_slot:
@@ -126,9 +125,9 @@ def bid(persona, table):
       {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
     )
   persona.scratch.current_bidding_reasonings['reveal'] = reveal_bid_dict["reasoning"]
-  reveal_bid = bounded_int(reveal_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 5})
+  reveal_bid = bounded_int(reveal_bid_dict["bid"], 0)
   debug_bid(persona, table, "reveal", REVEAL_MULTIPLIER * reveal_bid, reveal_bid_dict["reasoning"])
-  if persona.scratch.speaking_cooldown > 0:
+  if ENABLE_SPEAKING_COOLDOWN and persona.scratch.speaking_cooldown > 0:
     speaking_bid_dict = {
       "reasoning": f"I just spoke and should let others respond for {persona.scratch.speaking_cooldown} more turn(s).",
       "bid": "0"
@@ -139,7 +138,7 @@ def bid(persona, table):
       {"reasoning": "I have nothing useful to add out loud right now.", "bid": "0"}
     )
   persona.scratch.current_bidding_reasonings['speak'] = speaking_bid_dict["reasoning"]
-  speaking_bid = bounded_int(speaking_bid_dict["bid"], 0, allowed={0, 1, 2, 3, 4})
+  speaking_bid = bounded_int(speaking_bid_dict["bid"], 0)
   #print("reveal bid: ", reveal_bid_dict)
   #print("speaking bid: ", speaking_bid_dict)
   reveal_bid = REVEAL_MULTIPLIER * reveal_bid

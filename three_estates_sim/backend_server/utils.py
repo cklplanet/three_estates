@@ -30,6 +30,13 @@ def read_int_config(key, default):
         return default
 
 
+def read_bool_config(key, default):
+    raw_value = os.getenv(key) or read_local_env_value(key)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER_KEY") or "YOUR_API_KEY_HERE"
 CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
@@ -63,15 +70,29 @@ MOVEMENT_LEAVE_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_LEAVE_CO
 MOVEMENT_STAY_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_STAY_COOLDOWN_STEPS", 2)
 STARTING_MOVEMENT_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_STEPS", MOVEMENT_LEAVE_COOLDOWN_STEPS)
 STARTING_MOVEMENT_COOLDOWN_RADIUS = max(0, read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_RADIUS", 2))
+ENABLE_SPEAKING_COOLDOWN = read_bool_config("THREE_ESTATES_ENABLE_SPEAKING_COOLDOWN", False)
 SPEAKING_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_SPEAKING_COOLDOWN_STEPS", 1)
 SCRATCH_IMPORTANCE_TRIGGER_MAX = read_int_config("THREE_ESTATES_IMPORTANCE_TRIGGER_MAX", 150)
 SCRATCH_RETENTION_BATCHES = read_int_config("THREE_ESTATES_RETENTION_BATCHES", 15)
 SCRATCH_ATTENTION_BANDWIDTH = read_int_config("THREE_ESTATES_ATTENTION_BANDWIDTH", 3)
 MIN_ACTION_BID_SCORE = read_int_config("THREE_ESTATES_MIN_ACTION_BID_SCORE", 2)
+RETRIEVED_SELF_EVENT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_SELF_EVENT_CAP", 10)
+RETRIEVED_SELF_THOUGHT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_SELF_THOUGHT_CAP", 8)
+RETRIEVED_TABLE_EVENT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_TABLE_EVENT_CAP", 8)
+RETRIEVED_TABLE_THOUGHT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_TABLE_THOUGHT_CAP", 6)
+RETRIEVED_OTHER_TABLE_EVENT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_OTHER_TABLE_EVENT_CAP", 3)
+RETRIEVED_OTHER_TABLE_THOUGHT_CAP = read_int_config("THREE_ESTATES_RETRIEVED_OTHER_TABLE_THOUGHT_CAP", 2)
+RETRIEVED_CURRENT_TABLE_EVENT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_CURRENT_TABLE_EVENT_TOTAL_CAP", RETRIEVED_TABLE_EVENT_CAP)
+RETRIEVED_CURRENT_TABLE_THOUGHT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_CURRENT_TABLE_THOUGHT_TOTAL_CAP", RETRIEVED_TABLE_THOUGHT_CAP)
+RETRIEVED_FOREIGN_TABLE_EVENT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_FOREIGN_TABLE_EVENT_TOTAL_CAP", RETRIEVED_OTHER_TABLE_EVENT_CAP)
+RETRIEVED_FOREIGN_TABLE_THOUGHT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_FOREIGN_TABLE_THOUGHT_TOTAL_CAP", RETRIEVED_OTHER_TABLE_THOUGHT_CAP)
+NORMAL_TIMER_URGENCY_PHASES = read_int_config("THREE_ESTATES_NORMAL_TIMER_URGENCY_PHASES", 2)
+ENDGAME_TIMER_URGENCY_PHASES = read_int_config("THREE_ESTATES_ENDGAME_TIMER_URGENCY_PHASES", 1)
 SIM_SECONDS_PER_STEP = read_int_config(
     "THREE_ESTATES_SECONDS_PER_PHASE",
     read_int_config("THREE_ESTATES_SECONDS_PER_STEP", 10)
 )
+ENDGAME_SECONDS_PER_PHASE = read_int_config("THREE_ESTATES_ENDGAME_SECONDS_PER_PHASE", 2.5 * SIM_SECONDS_PER_STEP)
 SERVER_SLEEP_SECONDS = read_int_config("THREE_ESTATES_SERVER_SLEEP_SECONDS", 5)
 DIALOGUE_LOG_PATH = None
 CLEAN_DIALOGUE_LOG_PATH = None
@@ -98,27 +119,30 @@ GAME RULES:
 
 ROLE RULEBOOK:
 Every role corresponds to only one player, and each player has only one of the possible roles below:
-- King, Nobility: may reveal the King card at a table and choose a family; matching players cannot leave until the King leaves or an unaffected player leaves. If choosing Nobility, the King remains free to move. Wins if at most one Commoner is in the Castle.
+- King, Nobility: may reveal the King card at a table and choose a family; matching players ALREADY PRESENT at the table cannot leave until the King leaves or an unaffected player leaves (new arrivals after the declaration are unaffected). If choosing Nobility, the King remains free to move (but will still break the lock if he chooses to depart). Wins if at most one Commoner is in the Castle.
 - Queen, Nobility: when leaving a table, may reveal the Queen card and choose a player to follow to the new table; that player cannot leave until the Queen or someone else leaves that new table. Wins in Castle without King, or in Village with Priest.
-- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; immune to Baron's block and steal while doing so due to technically being no longer present. After the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed (that is, if you're losing then after the flip you would win instead, do consider how close you are to your own win condition before deciding if the Spinster is a threat or ally).
-- Bishop, Clergy: after someone leaves the Bishop's table, may reveal the Bishop card and guess another player's family; if correct, that player must leave. Wins with no Nobility at the final table.
+- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; immune to Baron's block and steal while doing so due to technically being no longer present. After the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player's role at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed (that is, if you're losing then after the flip you would win instead, so do consider how close you are to your own win condition before deciding if the Spinster is a threat or ally).
+- Bishop, Clergy: IMMEDIATELY after someone leaves the Bishop's table, may reveal the Bishop card and guess another player's family; if correct, that player must leave. Wins with no Nobility at the final table.
 - Priest, Clergy: when sitting with exactly one other player, may reveal the Priest card to see that player's role; fails if that player lacks their own role card. Wins if at most one person is in the Forest.
-- Farmer, Commoners: immune to other players' abilities (including Baron) except Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
-- Thief, Commoners: when sitting with exactly one other player, may reveal the Thief card to swap roles/win conditions with them; fails if the target lacks their own role card. Wins if every other player in the Village loses.
+- Farmer, Commoners: Immune to most abilities from any other role, except the following three cases: Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
+- Thief, Commoners: when sitting with exactly one other player, may reveal the Thief card to swap roles/win conditions (and, in case of the target being Baron, receive all the Baron's stolen cards too) with them; does not lose any Nun protection in this case; fails if the target lacks their own role card. The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock. Wins if every other player (than the Thief themself potentially) in the Village loses/doesn't exist.
 - Innkeeper, Commoners: upon entering the Village from elsewhere, may reveal the Innkeeper card and declare; if so, nobody can leave Village until someone else enters or the Innkeeper leaves. Wins with at least two Nobility at the final table.
 - Nun, Clergy: when sitting with exactly one other player, may give the Nun card to them; the holder is protected from other abilities and must return it if the Nun asks. Wins if at least three Commoners win.
-- Baron, Nobility: when another player reveals a card at a table with at least two other players, may reveal the Baron card to block an attempted ability and steal the revealed card; if it was only a reveal, the reveal stands but the Baron may still steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards. Spinster is immune to Baron's ability (but the Spinster-marked person isn't). Baron wins if holding at least three other players' cards.
+- Baron, Nobility: when another player reveals a card at a table with at least two other players, may reveal the Baron card to block an attempted ability and steal the revealed card; if it was only a reveal, the reveal stands but the Baron may still steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards (but still would be protected by a consciously granted Nun card). Spinster is immune to Baron's ability (but the Spinster-marked person isn't). Baron wins if holding at least three other players' cards (COUNTING a potential willingly granted Nun card).
 
 CARD RETRIEVAL RULES:
 - If the Baron stole your own role card, you keep your role and win condition but cannot use/reveal that card. You can reclaim it when and only when sitting alone with the Baron; the Baron must comply.
 - If the Nun gave you the Nun card, you are protected while holding it, cannot pass it onward, and must return it when the Nun asks (at any time).
+
+ADDITIONAL NOTES:
+- Nun card protection takes the highest precedence, even over Farmer immunity. Even an ability-granted, non-stolen Nun card, however, does NOT protect the Baron from having to return a stolen card when required to.
 """
 
 
 ROLE_DICT = {
     "King": {
         "family": "Nobility",
-        "ability": "When sitting at a table, may choose a family. Members of that family cannot leave the table unless the King or an unaffected player leaves. If nobility is chosen, the King may still move freely.",
+        "ability": "When sitting at a table, may choose a family. ALREADY PRESENT members of that family cannot leave the table unless the King or an unaffected player leaves. If nobility is chosen, the King may still move freely (BUT will still break the lock if he chooses to depart).",
         "win_condition": "Wins if at most 1 commoner is in the Castle at game end."
     },
     "Queen": {
@@ -129,11 +153,11 @@ ROLE_DICT = {
     "Spinster": {
         "family": "Commoners",
         "ability": "When leaving the Forest, can choose to point to a player there; immune to Baron's block and steal while doing so due to being no longer present. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
-        "win_condition": "If all other players at the Spinster's final table at game end are guessed correctly. In the event of this the win conditions of all other players' at said table are reversed."
+        "win_condition": "If all other players' roles at the Spinster's final table at game end are guessed correctly. In the event of this the win conditions of all other players' at said table are reversed."
     },
     "Bishop": {
         "family": "Clergy",
-        "ability": "When a player leaves the table, may guess the family of another player at the table. If correct, that player must leave the table immediately.",
+        "ability": "IMMEDIATELY (as in, within seconds of) whenever a player leaves the table, may guess the family of another player at the table. If correct, that player must leave the table immediately.",
         "win_condition": "Wins if sitting with no nobles at game end."
     },
     "Priest": {
@@ -143,13 +167,13 @@ ROLE_DICT = {
     },
     "Farmer": {
         "family": "Commoners",
-        "ability": "Is immune to other players’ abilities (including the Baron), except for the Nun’s card-giving, directly forced reveal from Spinster and Priest (because to prove immunity or not you have to reveal you're the Farmer anyway), and the Spinster’s endgame reversal.",
+        "ability": "Immune to most abilities from any other role, except the following three cases: Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. except for the Nun’s card-giving, directly forced reveal from Spinster and Priest (because to prove immunity or not you have to reveal you're the Farmer anyway), and the Spinster’s endgame reversal.",
         "win_condition": "Wins if sitting with at least two clergy members at game end."
     },
     "Thief": {
         "family": "Commoners",
-        "ability": "If sitting with only one other player, may swap roles and win conditions with that player. The ability fails if the other player does not have their role card.",
-        "win_condition": "Wins if every other player in the Village loses, even if the Thief is in the Village too."
+        "ability": "If sitting with only one other player, may swap roles and win conditions with that player (and, in case of the target being Baron, receive all the Baron's stolen cards too); does not lose any Nun protection in this case. The ability fails if the other player does not have their role card. The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock.",
+        "win_condition": "Wins if every other player (than the Thief themself, potentially) in the Village loses/doesn't exist."
     },
     "Innkeeper": {
         "family": "Commoners",
@@ -163,10 +187,50 @@ ROLE_DICT = {
     },
     "Baron": {
         "family": "Nobility",
-        "ability": "When a player reveals their card at a table with at least two other players, may block that ability and steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards. The original player keeps their role but loses the ability until they sit with the Baron alone, which must be allowed.",
-        "win_condition": "Wins if holding at least three other cards at game end."
+        "ability": "When a player reveals their (own; granted Nun cards don't count) card at a table with at least two other players, may block that ability and steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards (but still would be protected by a consciously granted Nun card). The original player keeps their role but loses the ability until they sit with the Baron alone, which must be allowed.",
+        "win_condition": "Wins if holding at least three other cards at game end (COUNTING a potential willingly granted Nun card)."
     }
 }
+
+
+def thief_swap_pair(player_a, player_b):
+    return frozenset([player_a, player_b])
+
+
+def thief_reverse_swap_locked(table, thief_name):
+    if len(getattr(table, "personas", {})) != 2:
+        return False
+    if thief_name not in table.personas:
+        return False
+    if table.personas[thief_name].scratch.role != "Thief":
+        return False
+    other_names = [name for name in table.personas if name != thief_name]
+    if not other_names:
+        return False
+    return thief_swap_pair(thief_name, other_names[0]) in getattr(table, "thief_swap_locks", set())
+
+
+def add_thief_swap_lock(table, player_a, player_b):
+    if not hasattr(table, "thief_swap_locks"):
+        table.thief_swap_locks = set()
+    table.thief_swap_locks.add(thief_swap_pair(player_a, player_b))
+
+
+def clear_thief_swap_locks_for_table_change(table, trigger_name=None):
+    if not hasattr(table, "thief_swap_locks"):
+        table.thief_swap_locks = set()
+        return []
+    if not table.thief_swap_locks:
+        return []
+    if trigger_name is None:
+        cleared = list(table.thief_swap_locks)
+        table.thief_swap_locks = set()
+        return cleared
+    cleared = [pair for pair in table.thief_swap_locks if trigger_name in pair]
+    if cleared:
+        table.thief_swap_locks.difference_update(cleared)
+    return cleared
+
 
 TIMERS = {"Castle": datetime.timedelta(minutes=6),
           "Forest": datetime.timedelta(minutes=7),
@@ -444,7 +508,7 @@ def debug_bid(persona, table, action, bid, reasoning):
     if not debug:
         return
     cooldown = ""
-    if action == "speak" and persona.scratch.speaking_cooldown > 0:
+    if ENABLE_SPEAKING_COOLDOWN and action == "speak" and persona.scratch.speaking_cooldown > 0:
         cooldown = f" | speaking_cooldown={persona.scratch.speaking_cooldown}"
     debug_log(
         f"[BID] t={persona.scratch.curr_time} | table={table.name} | "
@@ -465,6 +529,20 @@ def debug_movement(persona, table, requested_option, final_option, reasoning, su
         f"character={persona.scratch.name} | role={persona.scratch.role} | "
         f"option={final_option}{adjusted} | movement_cooldown={persona.scratch.movement_cooldown}{summary_text} | "
         f"reasoning={reasoning}"
+    )
+
+
+def debug_ability_target(persona, table, requested_target, final_target, ability_reasoning=""):
+    if not debug:
+        return
+    adjusted = ""
+    if requested_target != final_target:
+        adjusted = f" | adjusted_from={requested_target}"
+    reasoning_text = f" | ability_reasoning={ability_reasoning}" if ability_reasoning else ""
+    debug_log(
+        f"[ABILITY-TARGET] t={persona.scratch.curr_time} | table={table.name} | "
+        f"character={persona.scratch.name} | role={persona.scratch.role} | "
+        f"target={final_target}{adjusted}{reasoning_text}"
     )
 
 
@@ -491,6 +569,36 @@ def role_keywords_from_text(text):
             keywords.add(role_data["family"])
     for family in {"Nobility", "Commoners", "Clergy"}:
         if family.lower() in lower or family.rstrip("s").lower() in lower:
+            keywords.add(family)
+    return keywords
+
+
+def event_role_keywords_from_text(text):
+    lower = str(text or "").lower()
+    keywords = set()
+    for role, role_data in ROLE_DICT.items():
+        role_lower = role.lower()
+        role_patterns = [
+            rf"\b{re.escape(role_lower)}\s+card\b",
+            rf"\breveals?\s+(?:his|her|their|the)?\s*{re.escape(role_lower)}\b",
+            rf"\brevealed\s+as\s+(?:the\s+)?{re.escape(role_lower)}\b",
+            rf"\bclaims?\s+(?:to\s+be\s+)?(?:the\s+)?{re.escape(role_lower)}\b",
+            rf"\bis\s+(?:now\s+)?(?:the\s+)?{re.escape(role_lower)}\b",
+        ]
+        if any(re.search(pattern, lower) for pattern in role_patterns):
+            keywords.add(role)
+            keywords.add(role_data["family"])
+    for family in {"Nobility", "Commoners", "Clergy"}:
+        family_lower = family.lower()
+        family_singular = family_lower.rstrip("s")
+        family_patterns = [
+            rf"\bfamily\s+(?:as|is|of)\s+(?:the\s+)?{re.escape(family_lower)}\b",
+            rf"\b{re.escape(family_lower)}\s+family\b",
+            rf"\ball\s+(?:present\s+)?{re.escape(family_lower)}\b",
+            rf"\bthe\s+{re.escape(family_lower)}\b",
+            rf"\b{re.escape(family_singular)}\s+claim\b",
+        ]
+        if any(re.search(pattern, lower) for pattern in family_patterns):
             keywords.add(family)
     return keywords
 
