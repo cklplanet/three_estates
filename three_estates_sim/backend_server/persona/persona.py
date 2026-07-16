@@ -25,6 +25,7 @@ from persona.cognitive_modules.perceive import *
 from persona.cognitive_modules.retrieve import *
 from persona.cognitive_modules.plan import *
 from persona.cognitive_modules.reflect import *
+from persona.cognitive_modules.perceive import generate_poig_score as generate_perception_poig_score
 
 class Persona: 
   def __init__(self, name, room, role, folder_mem_saved=False):
@@ -42,7 +43,71 @@ class Persona:
     # <scratch> is the persona's scratch (short term memory) space. 
     scratch_saved = f"{folder_mem_saved}/scratch.json"
     self.scratch = Scratch(role, f_saved=scratch_saved)
+    self.ensure_own_card_identity()
 
+  def ensure_own_card_identity(self):
+    if not self.scratch.name:
+      return
+    legacy_role_card = self.scratch.role
+    canonical = owned_role_card(self)
+    if legacy_role_card in self.scratch.cards_slot and canonical not in self.scratch.cards_slot:
+      self.scratch.cards_slot.discard(legacy_role_card)
+      self.scratch.cards_slot.add(canonical)
+    protection_cards = nun_protection_cards(self)
+    self.scratch.nun_protection_cards = protection_cards
+    self.scratch.nun_protected = bool(protection_cards)
+
+  def has_own_card(self, role=None):
+    return has_own_role_card(self, role)
+
+  def protected_by_nun(self):
+    self.scratch.nun_protected = has_nun_protection(self)
+    return self.scratch.nun_protected
+
+  def reset_movement_cooldown_after_action(self, table, action_name):
+    if self.scratch.movement_cooldown != 0:
+      self.scratch.movement_cooldown = 0
+      debug_log(
+        f"[ACTION-COOLDOWN-RESET] t={self.scratch.curr_time} | table={table.name} | "
+        f"character={self.scratch.name} | action={action_name} | movement_cooldown=0"
+      )
+
+  def queen_drag_blocked_by_king_lock(self, table, target_name, destination=None):
+    if target_name not in table.personas:
+      return False
+    target = table.personas[target_name]
+    king_locks = [
+      benefactor
+      for benefactor, locked_target, lock_role in table.lockdown_targets
+      if lock_role == "King" and locked_target == target_name and benefactor != target_name
+    ]
+    if not king_locks:
+      return False
+    family = ROLE_DICT[target.scratch.role]["family"]
+    destination_text = f" to {destination}" if destination else ""
+    target.speak(
+      table,
+      (
+        f"the Queen {self.scratch.name} is trying to drag you{destination_text}, "
+        f"but a King's lockdown is holding your family, {family}, at this table; "
+        "react in the moment without revealing your exact role"
+      ),
+      consume_cooldown=False,
+    )
+    act_desp = (
+      f"{self.scratch.name}'s Queen drag attempt on {target_name} fails because "
+      f"{target_name}'s family, {family}, is held by a King's lockdown at {table.name}."
+    )
+    table.add_table_event(
+      (
+        self.scratch.name,
+        target_name,
+        act_desp,
+        self.scratch.curr_time,
+        set([self.scratch.name, target_name, "Queen", "King", family]),
+      )
+    )
+    return True
 
   def save(self, save_folder): 
     """
@@ -180,56 +245,199 @@ class Persona:
     if len(table.personas) < 3 or revealed_player_name not in table.personas:
       return False
     revealed_player = table.personas[revealed_player_name]
-    if (
-      revealed_player.scratch.role == "Farmer"
-      or (revealed_player.scratch.nun_protected and "Nun" in revealed_player.scratch.cards_slot)
-    ):
+    if revealed_player.scratch.role == "Farmer":
       return False
-    if revealed_player.scratch.role not in revealed_player.scratch.cards_slot:
+    if not has_own_role_card(revealed_player):
       return False
 
-    for baron_name, baron in table.personas.items():
-      if baron_name == revealed_player_name:
-        continue
-      if baron.scratch.role != "Baron" or "Baron" not in baron.scratch.cards_slot:
-        continue
+    def eligible_baron_candidates(excluded_names=None):
+      excluded_names = set(excluded_names or [])
+      candidates = []
+      for candidate_name, candidate in table.personas.items():
+        if candidate_name in excluded_names or candidate_name == revealed_player_name:
+          continue
+        if candidate.scratch.role != "Baron" or not has_own_role_card(candidate):
+          continue
+        candidates.append((candidate_name, candidate))
+      return candidates
 
+    def baron_reaction_bid(baron_name, baron, target_player, target_action_context, reaction_context, debug_tag, known_baron_trophy_cards=None):
       baron.update_knowledge(self.room)
       decision = prompt_dict(
-        run_gpt_prompt_decide_baron_block(baron, table, revealed_player, action_context),
-        {"reasoning": "I will not reveal myself as Baron for this trigger.", "result": "no"}
+        run_gpt_prompt_decide_baron_block(
+          baron,
+          table,
+          target_player,
+          target_action_context,
+          reaction_context,
+          known_baron_trophy_cards=known_baron_trophy_cards,
+        ),
+        {"reasoning": "I will not reveal myself as Baron for this trigger.", "bid": "0"}
       )
-      result = str(decision["result"]).strip().lower()
-      reasoning = decision["reasoning"]
+      raw_bid = decision.get("bid")
+      if raw_bid is None:
+        raw_bid = 6 if str(decision.get("result", "no")).strip().lower() == "yes" else 0
+      bid = bounded_int(raw_bid, 0)
+      if bid >= 6:
+        bid = 6
+      elif bid >= 3:
+        bid = 3
+      else:
+        bid = 0
+      reasoning = decision.get("reasoning", "")
       debug_log(
-        f"[BARON-REACTION] t={self.scratch.curr_time} | table={table.name} | "
-        f"baron={baron_name} | target={revealed_player_name} | result={result} | "
+        f"[{debug_tag}] t={self.scratch.curr_time} | table={table.name} | "
+        f"baron={baron_name} | target={target_player.scratch.name} | bid={bid} | "
         f"reasoning={reasoning}"
       )
-      if result != "yes":
-        continue
+      return {"baron_name": baron_name, "baron": baron, "bid": bid, "reasoning": reasoning}
 
-      stolen_role = revealed_player.scratch.role
+    def choose_baron_bidder(bid_records, debug_tag):
+      active_bids = [record for record in bid_records if record["bid"] > 0]
+      if not active_bids:
+        return None
+      top_bid = max(record["bid"] for record in active_bids)
+      top_records = [record for record in active_bids if record["bid"] == top_bid]
+      winner = random.choice(top_records)
+      if len(top_records) > 1:
+        debug_log(
+          f"[{debug_tag}-TIEBREAK] t={self.scratch.curr_time} | table={table.name} | "
+          f"bid={top_bid} | candidates={[record['baron_name'] for record in top_records]} | "
+          f"winner={winner['baron_name']}"
+        )
+      return winner
+
+    def resolve_baron_steal(baron_name, baron, target_player, target_action_context, target_is_primary_baron=False, known_baron_trophy_cards=None):
+      stolen_role = target_player.scratch.role
+      known_baron_trophy_cards = set(known_baron_trophy_cards or [])
+      baron.reset_movement_cooldown_after_action(table, "baron-reaction")
       special_circumstance = (
-        f"you are revealing your Baron card right now to react to {revealed_player_name}'s action "
+        f"you are revealing your Baron card right now to react to {target_player.scratch.name}'s action "
         f"and steal the {stolen_role} card now. This is happening in this moment; do not imply "
-        f"that you already had {revealed_player_name}'s {stolen_role} card before this reaction"
+        f"that you already had {target_player.scratch.name}'s {stolen_role} card before this reaction"
       )
-      if block_ability:
-        special_circumstance += f", blocking {revealed_player_name}'s {stolen_role} ability before it resolves"
+      if len(role_pool_for_mode()) == 16 and stolen_role == "Baron":
+        special_circumstance = (
+          f"you are revealing your Baron card right now to react to the Baron {target_player.scratch.name}. "
+          f"In expanded mode you steal {target_player.scratch.name}'s trophy cards only, not {target_player.scratch.name}'s own Baron role card"
+        )
+      elif block_ability and not target_is_primary_baron:
+        special_circumstance += f", blocking {target_player.scratch.name}'s {stolen_role} ability before it resolves"
       else:
         special_circumstance += " after their reveal has already been made"
       baron.speak(table, special_circumstance)
-      revealed_player.scratch.cards_slot.discard(stolen_role)
-      baron.scratch.cards_slot.add(stolen_role)
-      if block_ability:
-        act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')}, blocks {revealed_player_name}'s {stolen_role} ability, and steals the {stolen_role} card."
+      if has_nun_protection(target_player):
+        if len(role_pool_for_mode()) == 16 and stolen_role == "Baron":
+          attempt_desp = (
+            f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} and attempts to steal "
+            f"{target_player.scratch.name}'s Baron trophies without taking the Baron role card."
+          )
+          effect_description = f"steal your Baron trophies"
+        elif block_ability and not target_is_primary_baron:
+          attempt_desp = (
+            f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} and attempts to block "
+            f"{target_player.scratch.name}'s {stolen_role} ability and steal the {stolen_role} card."
+          )
+          effect_description = (
+            f"block your {stolen_role} ability and steal your {stolen_role} card"
+          )
+        else:
+          attempt_desp = (
+            f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} and attempts to steal "
+            f"{target_player.scratch.name}'s {stolen_role} card after the reveal."
+          )
+          effect_description = f"steal your {stolen_role} card after your reveal"
+        table.add_table_event((baron_name, target_player.scratch.name, attempt_desp, self.scratch.curr_time, set([baron_name, target_player.scratch.name, "Baron", stolen_role])))
+        self.show_nun_protection(table, baron_name, "Baron", target_player.scratch.name, effect_description)
+        return set()
+      if len(role_pool_for_mode()) == 16 and stolen_role == "Baron":
+        stolen_trophies = held_trophy_cards(target_player)
+        target_player.scratch.cards_slot.difference_update(stolen_trophies)
+        target_player.scratch.nun_protection_cards.difference_update(stolen_trophies)
+        target_player.scratch.baron_obfuscated_trophy_cards.difference_update(stolen_trophies)
+        target_player.scratch.nun_protected = has_nun_protection(target_player)
+        baron.scratch.cards_slot.update(stolen_trophies)
+        if target_is_primary_baron:
+          baron.scratch.baron_obfuscated_trophy_cards.update(stolen_trophies - known_baron_trophy_cards)
+          for visible_card in known_baron_trophy_cards:
+            visible_owner = card_owner(visible_card)
+            visible_role = card_role(visible_card)
+            if visible_owner in self.room.personas and visible_role:
+              set_baron_stolen_claim(self.room.personas[visible_owner], visible_role, baron_name)
+        known_trophy_text = ", ".join(describe_card(card) for card in sorted(known_baron_trophy_cards)) if known_baron_trophy_cards else ""
+        if target_is_primary_baron:
+          known_clause = f", including the visibly just-stolen {known_trophy_text}" if known_trophy_text else ""
+          act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')}, countersteals {target_player.scratch.name}'s Baron trophies{known_clause}, and does not take the Baron role card."
+        elif block_ability:
+          act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')}, blocks {target_player.scratch.name}'s Baron ability, and steals {target_player.scratch.name}'s Baron trophies without taking the Baron role card."
+        else:
+          act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} after {target_player.scratch.name}'s reveal and steals {target_player.scratch.name}'s Baron trophies without taking the Baron role card."
+        stolen_cards = set(stolen_trophies)
       else:
-        act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} after {revealed_player_name}'s reveal and steals the {stolen_role} card."
-      table.add_table_event((baron_name, revealed_player_name, act_desp, self.scratch.curr_time, set([baron_name, revealed_player_name])))
-      self.clear_active_locks_after_card_stolen(revealed_player_name, stolen_role, baron_name)
-      return True
-    return False
+        removed_cards = remove_own_role_card(target_player, stolen_role)
+        baron.scratch.cards_slot.update(removed_cards or {card_id(stolen_role, target_player.scratch.name)})
+        stolen_cards = set(removed_cards or {card_id(stolen_role, target_player.scratch.name)})
+        set_baron_stolen_claim(target_player, stolen_role, baron_name)
+        if block_ability:
+          act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')}, blocks {target_player.scratch.name}'s {stolen_role} ability, and steals the {stolen_role} card."
+        else:
+          act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} after {target_player.scratch.name}'s reveal and steals the {stolen_role} card."
+        self.clear_active_locks_after_card_stolen(target_player.scratch.name, stolen_role, baron_name)
+      table.add_table_event((baron_name, target_player.scratch.name, act_desp, self.scratch.curr_time, set([baron_name, target_player.scratch.name, "Baron", stolen_role])))
+      return stolen_cards
+
+    primary_context = (
+      "This is a primary Baron reaction to another player's reveal or attempted ability. "
+      "If multiple Barons react, the highest bid acts first; tied top bids are broken randomly."
+    )
+    primary_bids = [
+      baron_reaction_bid(baron_name, baron, revealed_player, action_context, primary_context, "BARON-REACTION-BID")
+      for baron_name, baron in eligible_baron_candidates()
+    ]
+    primary_winner = choose_baron_bidder(primary_bids, "BARON-REACTION")
+    if not primary_winner:
+      return False
+
+    primary_baron_name = primary_winner["baron_name"]
+    primary_baron = primary_winner["baron"]
+    primary_stolen_cards = resolve_baron_steal(primary_baron_name, primary_baron, revealed_player, action_context)
+    if has_nun_protection(revealed_player):
+      return False
+
+    counter_candidates = eligible_baron_candidates(excluded_names={primary_baron_name, revealed_player_name})
+    if len(role_pool_for_mode()) == 16 and counter_candidates and primary_baron_name in table.personas:
+      counter_context = (
+        f"The Baron {primary_baron_name} has just revealed a Baron card and claimed the reaction first. "
+        f"If you counterreact, you do NOT take {primary_baron_name}'s own Baron role card; you steal {primary_baron_name}'s Baron trophy cards. "
+        "This can move the original victim's stolen card from the first Baron to you."
+      )
+      counter_action_context = (
+        f"{primary_baron_name} reveals a Baron card to block/steal from {revealed_player_name}. "
+        f"Original trigger: {action_context}"
+      )
+      counter_bids = [
+        baron_reaction_bid(
+          baron_name,
+          baron,
+          primary_baron,
+          counter_action_context,
+          counter_context,
+          "BARON-COUNTER-BID",
+          known_baron_trophy_cards=primary_stolen_cards,
+        )
+        for baron_name, baron in counter_candidates
+      ]
+      counter_winner = choose_baron_bidder(counter_bids, "BARON-COUNTER")
+      if counter_winner:
+        resolve_baron_steal(
+          counter_winner["baron_name"],
+          counter_winner["baron"],
+          primary_baron,
+          counter_action_context,
+          target_is_primary_baron=True,
+          known_baron_trophy_cards=primary_stolen_cards,
+        )
+    return True
 
 
   def perceive(self, room):
@@ -308,11 +516,51 @@ class Persona:
     speak_dict["line"] = str(speak_dict.get("line") or default_line["line"]).strip() or default_line["line"]
     return speak_dict
 
+  def remember_own_dialogue(self, table, dialogue_tuple):
+    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(dialogue_tuple)
+    if s_chat != self.scratch.name:
+      return
+    if audience and self.scratch.name not in audience:
+      return
+    target_text = o_chat or f"all of {table.name}"
+    audience_text = ", ".join(sorted(audience)) if audience else "unknown"
+    description = (
+      f"{s_chat}, to {target_text}: ({volume}) {line} "
+      f"[People physically present for this line: {audience_text}]"
+    )
+    chat_poignancy = generate_perception_poig_score(
+      self,
+      "chat",
+      description,
+      s_chat,
+      target_text,
+      keywords_chat,
+    )
+    if description in self.a_mem.embeddings:
+      line_embedding = self.a_mem.embeddings[description]
+    else:
+      line_embedding = get_embedding(description)
+    node = self.a_mem.add_chat(
+      timestamp_chat,
+      s_chat,
+      target_text,
+      table.name,
+      description,
+      keywords_chat,
+      chat_poignancy,
+      (description, line_embedding),
+    )
+    self.scratch.importance_ele_n += 1
+    self.scratch.dialogue_cursors[table.name] = len(table.dialogue_history)
+    self.scratch.recent_conversation[0:0] = [(self.scratch.curr_time, [node])]
+    self.scratch.recent_conversation = self.scratch.recent_conversation[:self.scratch.retention]
+
   def emit_speech_dict(self, table, speak_dict, consume_cooldown=True):
     speak_dict = self.normalize_speech_dict(table, speak_dict)
     table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
+    self.remember_own_dialogue(table, table.dialogue_history[-1])
     if consume_cooldown and ENABLE_SPEAKING_COOLDOWN:
-      self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
+      self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, 1)
     return speak_dict
 
   def speak(self, table, special_circumstance=None, consume_cooldown=True):
@@ -323,6 +571,19 @@ class Persona:
     else:
       speak_dict = prompt_dict(run_gpt_prompt_generate_next_convo_line_normal(self, table), default_line)
     return self.emit_speech_dict(table, speak_dict, consume_cooldown=consume_cooldown)
+
+  def broadcast_global_reveal_event(self, origin_table, role, local_description):
+    if not self.room:
+      return
+    remote_description = (
+      f"From the {origin_table.name}, {local_description}; the reveal was made loudly and visibly enough "
+      "for every table to verify, but only Barons physically at the origin table can react to it."
+    )
+    keywords = set([self.scratch.name, role, ROLE_DICT[role]["family"], origin_table.name])
+    for table_name, table in self.room.locations.items():
+      if table_name == origin_table.name:
+        continue
+      table.add_table_event((self.scratch.name, None, remote_description, self.scratch.curr_time, keywords), log_event=False)
 
   def select_ability_target(self, table, ability_reasoning=""):
     movement_reasoning = self.scratch.current_movement_reasoning
@@ -376,7 +637,7 @@ class Persona:
     response = str(response_dict.get("response", "no reveal")).strip().lower()
     if response not in {"hard reveal", "soft reveal", "no reveal"}:
       response = "no reveal"
-    if response == "hard reveal" and self.scratch.role not in self.scratch.cards_slot:
+    if response == "hard reveal" and not self.has_own_card():
       response = "no reveal"
       response_dict["line"] = "That guess is wrong, but I cannot prove it with a card right now."
     obj = response_dict.get("object", "everyone")
@@ -387,8 +648,9 @@ class Persona:
       volume = "calm"
     line = response_dict.get("line", "That guess is wrong.")
     table.add_table_dialogue((self.scratch.name, obj, volume, line, self.scratch.curr_time, set([self.scratch.name, obj])))
+    self.remember_own_dialogue(table, table.dialogue_history[-1])
     if ENABLE_SPEAKING_COOLDOWN:
-      self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, SPEAKING_COOLDOWN_STEPS + 1)
+      self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, 1)
     debug_log(
       f"[BISHOP-WRONG-RESPONSE] t={self.scratch.curr_time} | table={table.name} | "
       f"bishop={bishop.scratch.name} | target={self.scratch.name} | guessed_family={guessed_family} | "
@@ -410,13 +672,13 @@ class Persona:
       possible_holders.update(
         name
         for name, player in table.personas.items()
-        if player.scratch.nun_protected and "Nun" in player.scratch.cards_slot
+        if has_nun_protection(player)
       )
       for holder_name in sorted(possible_holders):
         if (
           holder_name in table.personas
-          and "Nun" in table.personas[holder_name].scratch.cards_slot
-          and table.personas[holder_name].scratch.nun_protected
+          and has_card(table.personas[holder_name].scratch.cards_slot, "Nun", self.scratch.name)
+          and has_nun_protection(table.personas[holder_name])
         ):
           nun_holder_names.add(holder_name)
           options.append({
@@ -428,16 +690,19 @@ class Persona:
       remaining = set(table.personas.keys()) - {self.scratch.name}
       if len(remaining) == 1:
         other_name = next(iter(remaining))
-        other = table.personas[other_name]
+        baron_claim = baron_stolen_claim(self, self.scratch.role)
+        can_attempt_baron_retrieval = bool(baron_claim) and not has_own_role_card(self)
         if (
           other_name not in nun_holder_names
-          and other.scratch.role == "Baron"
-          and self.scratch.role in other.scratch.cards_slot
+          and can_attempt_baron_retrieval
         ):
           options.append({
             "target": other_name,
             "kind": "baron",
-            "description": f"retrieve your {self.scratch.role} card from {other_name}"
+            "description": (
+              f"probe {other_name} in this one-on-one to see whether they might currently hold your {self.scratch.role} card after a Baron theft. "
+              "You do not know for certain that they have it; this may fail if they are not the Baron holding that card now."
+            )
           })
     return options
 
@@ -482,7 +747,7 @@ class Persona:
     }
     if role not in {"Queen", "Spinster"}:
       return [normal_record]
-    if role not in self.scratch.cards_slot:
+    if not self.has_own_card(role):
       return [normal_record]
     if role == "Spinster" and table.name != "Forest":
       return [normal_record]
@@ -516,14 +781,22 @@ class Persona:
       )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
       if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
+        self.scratch.movement_cooldown = 0
+        return []
+      if self.queen_drag_blocked_by_king_lock(table, target_name, destination):
         normal_record["farewell"] = False
+        normal_record["speech_constraint"] = (
+          f"your Queen drag attempt on {target_name} failed because a King's lockdown holds "
+          "that target's family at this table; leave alone without implying they are following you"
+        )
         return [normal_record]
 
       self.scratch.ability_active = True
       target = table.personas[target_name]
       target.speak(
         table,
-        f"the Queen has just activated {poss} ability after deciding to leave for {destination}, chose you as the target, and is about to drag you there, as parting words,",
+        f"the Queen has just successfully activated {poss} ability after deciding to leave for {destination}, chose you as the target, and is about to drag you there, as parting words: "
+        "(For this occasion, the Queen ability has succeeded; do not claim or imply that this current drag was nullified just because an earlier Queen lock or drag was broken)",
         consume_cooldown=False,
       )
       event_msg = (
@@ -567,7 +840,7 @@ class Persona:
     if target_name not in table.personas:
       return
     target = table.personas[target_name]
-    if target.scratch.nun_protected and "Nun" in target.scratch.cards_slot:
+    if has_nun_protection(target):
       self.show_nun_protection(
         table,
         self.scratch.name,
@@ -581,7 +854,7 @@ class Persona:
       )
       table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([target_name, self.scratch.name, "Nun"])))
       return
-    if target.scratch.role not in target.scratch.cards_slot:
+    if not has_own_role_card(target):
       special_circumstance = (
         f"the departing Spinster {self.scratch.name} has forced you to reveal your role card, "
         "but you do not currently have your own role card and therefore cannot prove/reveal it"
@@ -599,7 +872,7 @@ class Persona:
         "You are normally immune to other players' abilities, but in this oddly useless edge case "
         "the card reveal is also how you prove you are Farmer, so lampshade that the proof still has to happen "
         "and do not describe this as immunity preventing the reveal. "
-        "The Baron cannot block the Spinster forcing this reveal, but a Baron may still react to the card you reveal afterward"
+        "The Baron cannot block the Spinster forcing this reveal, and Farmer protection also prevents Barons from reacting to the Farmer card reveal afterward"
       )
     else:
       special_circumstance = (
@@ -644,6 +917,7 @@ class Persona:
     if not line:
       line = "The timers are gone; now my guesses decide whether this table's endings turn inside out."
     table.add_table_dialogue((self.scratch.name, "everyone", "calm", line, self.scratch.curr_time, set([self.scratch.name] + target_names)))
+    self.remember_own_dialogue(table, table.dialogue_history[-1])
 
     self.scratch.endgame_role_guesses = guesses
     guess_text = ", ".join(f"{name} as {role}" for name, role in guesses.items()) or "no other players"
@@ -695,11 +969,11 @@ class Persona:
     _, _, _, _, retrieved_all_tables = self.scratch.retrieved
     act_scores = self.scratch.current_bidding_scores
     action_tie_break_priority = {
-      "retrieve": 4,
-      "speak": 3,
-      "ability": 2,
-      "nun-reveal": 1,
-      "reveal": -1,
+      "retrieve": 5,
+      "ability": 4,
+      "nun-reveal": 3,
+      "reveal": 2,
+      "speak": 1,
     }
     act_scores = [
       (option, points)
@@ -739,8 +1013,11 @@ class Persona:
         self.speak(table)
       return
 
+    if final_option != "speak":
+      self.reset_movement_cooldown_after_action(table, final_option)
+
     if final_option == "ability":
-      if action_role not in self.scratch.cards_slot:
+      if not self.has_own_card(action_role):
         act_desp = f"{self.scratch.name} reaches for {self.role_card_text(role=action_role)}, but cannot use the ability because {subj} does not have it."
         table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
         if not self.maybe_stay_silent(table, "they cannot prove their role card right now"):
@@ -795,12 +1072,78 @@ class Persona:
           )
         return
 
+      if action_role == "Bishop":
+        target = table.personas[target_name]
+        guess_dict = self.guess_family_bishop(target, table)
+        guess = guess_dict.get("guess", ROLE_DICT[target.scratch.role]["family"])
+        family_options = {role_data["family"] for role_data in ROLE_DICT.values()}
+        if guess not in family_options:
+          guess = ROLE_DICT[target.scratch.role]["family"]
+        debug_log(
+          f"[BISHOP-GUESS] t={self.scratch.curr_time} | table={table.name} | "
+          f"bishop={self.scratch.name} | target={target_name} | guessed_family={guess} | "
+          f"reasoning={guess_dict.get('reasoning', '')}"
+        )
+        ability_attempt_context = (
+          f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} and attempts to use "
+          f"{poss} {action_role} ability on {target_name} by guessing {guess}."
+        )
+        ability_speech_context = (
+          f"you are revealing your Bishop card and attempting to use your ability on {target_name}; "
+          f"you have already chosen to guess that {target_name}'s family is {guess}. "
+          "Say what you want the table to hear before the ability resolves, and do not imply a different guessed family"
+        )
+        self.speak(
+          table,
+          with_optional_speaking_reasoning(
+            with_winning_act_reasoning(
+              ability_speech_context,
+              "ability",
+            )
+          )
+        )
+        table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name, guess])))
+        if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
+          return
+        if has_nun_protection(target):
+          self.show_nun_protection(
+            table,
+            self.scratch.name,
+            action_role,
+            target_name,
+            "guess your family and force you to leave if the guess is correct"
+          )
+          return
+        if guess != ROLE_DICT[target.scratch.role]["family"]:
+          target.respond_to_wrong_bishop_guess(self, guess, table)
+        else:
+          target_choice_context = (
+            f"the Bishop {self.scratch.name} correctly guessed your family as {guess}; "
+            "you, the target of the Bishop ability, must choose which other table to leave for"
+          )
+          next_loc = target.select_ability_destination(table, retrieved_all_tables, target_choice_context)
+          special_circumstance = f"you have just been correctly guessed by the Bishop {self.scratch.name} as family {guess} and now have to leave for {next_loc}"
+          table.removal_targets.add((self.scratch.name, target_name, action_role, next_loc))
+          target.speak(table, special_circumstance, consume_cooldown=False)
+          act_desp = f"the Bishop {self.scratch.name} correctly guesses {target_name}'s family as {guess} and the latter has to leave for {next_loc}"
+          table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name, guess])))
+        return
+
       ability_attempt_context = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} and attempts to use {poss} {action_role} ability on {target_name}."
+      ability_speech_context = (
+        f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; "
+        "say what you want the table to hear before the ability resolves"
+      )
+      if action_role == "King":
+        ability_speech_context += (
+          ". Important: a King's lock only affects already-seated players of the chosen family at this table right now. "
+          "Do not say or imply that this use will trap people currently in transit, later arrivals, or anyone not physically present here"
+        )
       self.speak(
         table,
         with_optional_speaking_reasoning(
           with_winning_act_reasoning(
-            f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; say what you want the table to hear before the ability resolves",
+            ability_speech_context,
             "ability",
           )
         )
@@ -813,7 +1156,7 @@ class Persona:
         self.scratch.ability_active = True
         for other_player_name, other_player in table.personas.items():
           if other_player_name != self.scratch.name and ROLE_DICT[other_player.scratch.role]["family"] == target_name:
-            if other_player.scratch.nun_protected and "Nun" in other_player.scratch.cards_slot:
+            if has_nun_protection(other_player):
               self.show_nun_protection(
                 table,
                 self.scratch.name,
@@ -831,22 +1174,25 @@ class Persona:
               self.scratch.ability_objects.append(other_player_name)
               self.scratch.ability_locations.add(table.name)
         act_desp = f"{self.scratch.name} reveals {self.role_card_text(role='King')} and uses {poss} ability to lock down all present {target_name} at {table.name}"
-        table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name] + self.scratch.ability_objects)))
+        public_keywords = {self.scratch.name, "King", ROLE_DICT["King"]["family"], target_name, table.name}
+        table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, public_keywords))
         return
 
       target = table.personas[target_name]
 
       if action_role == "Nun":
         self.scratch.ability_active = True
-        self.scratch.cards_slot.discard("Nun")
+        nun_cards = remove_own_role_card(self, "Nun")
         self.scratch.ability_objects.append(target_name)
-        target.scratch.cards_slot.add("Nun")
+        granted_cards = nun_cards or {card_id("Nun", self.scratch.name)}
+        target.scratch.cards_slot.update(granted_cards)
+        target.scratch.nun_protection_cards.update(granted_cards)
         target.scratch.nun_protected = True
         act_desp = f"{self.scratch.name} reveals {self.role_card_text(role='Nun')} and uses {poss} ability by giving {poss} card to protect {target_name}"
         table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
         return
 
-      if target.scratch.nun_protected and "Nun" in target.scratch.cards_slot:
+      if has_nun_protection(target):
         self.show_nun_protection(
           table,
           self.scratch.name,
@@ -875,25 +1221,43 @@ class Persona:
         return
 
       if action_role == "Thief":
-        if target.scratch.role not in target.scratch.cards_slot:
+        if target.scratch.role == "Thief":
+          special_circumstance = f"the Thief {self.scratch.name} is trying to use {poss} ability on you, but Thieves are immune to Thief swaps; answer that failed attempt in the moment"
+          target.speak(table, special_circumstance)
+          act_desp = f"{self.scratch.name}'s Thief swap attempt on {target_name} fails because Thieves are immune to Thief swaps."
+          table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name, "Thief"])))
+          return
+        if not has_own_role_card(target):
           special_circumstance = f"the Thief {self.scratch.name} is trying to use {poss} ability on you but you don't have your role card with you thus want to use this to prove you're immune,"
           target.speak(table, special_circumstance)
         else:
           old_role = self.scratch.role
           target_old_role = target.scratch.role
-          thief_extra_cards = set(self.scratch.cards_slot) - {old_role}
-          target_extra_cards = set(target.scratch.cards_slot) - {target_old_role}
-          self.scratch.cards_slot.discard(old_role)
-          self.scratch.cards_slot.add(target_old_role)
+          thief_extra_cards = held_non_own_cards(self)
+          target_extra_cards = held_non_own_cards(target)
+          removed_self_cards = remove_own_role_card(self, old_role)
+          removed_target_cards = remove_own_role_card(target, target_old_role)
+          self.scratch.cards_slot.update(
+            retag_cards_owner(removed_target_cards, self.scratch.name)
+            or {card_id(target_old_role, self.scratch.name)}
+          )
           if target_old_role == "Baron":
+            transferred_obfuscated = set(target.scratch.baron_obfuscated_trophy_cards) & set(target_extra_cards)
             self.scratch.cards_slot.update(target_extra_cards)
+            self.scratch.baron_obfuscated_trophy_cards.update(transferred_obfuscated)
             target.scratch.cards_slot.difference_update(target_extra_cards)
+            target.scratch.baron_obfuscated_trophy_cards.difference_update(target_extra_cards)
           self.scratch.role = target_old_role
-          target.scratch.cards_slot.discard(target_old_role)
-          target.scratch.cards_slot.add(old_role)
+          target.scratch.cards_slot.update(
+            retag_cards_owner(removed_self_cards, target.scratch.name)
+            or {card_id(old_role, target.scratch.name)}
+          )
           if old_role == "Baron":
+            transferred_obfuscated = set(self.scratch.baron_obfuscated_trophy_cards) & set(thief_extra_cards)
             target.scratch.cards_slot.update(thief_extra_cards)
+            target.scratch.baron_obfuscated_trophy_cards.update(transferred_obfuscated)
             self.scratch.cards_slot.difference_update(thief_extra_cards)
+            self.scratch.baron_obfuscated_trophy_cards.difference_update(thief_extra_cards)
           target.scratch.role = old_role
           self.scratch.movement_cooldown = 0
           add_thief_swap_lock(table, self.scratch.name, target_name)
@@ -907,12 +1271,23 @@ class Persona:
           target.speak(table, special_circumstance)
 
       elif action_role == "Queen":
-        self.scratch.ability_active = True
         special_circumstance = f"you, as Queen, have just activated your ability to force {target_name} to follow you"
         next_loc = self.select_ability_destination(table, retrieved_all_tables, special_circumstance)
+        if self.queen_drag_blocked_by_king_lock(table, target_name, next_loc):
+          table.removal_targets.add((None, self.scratch.name, action_role, next_loc))
+          event_msg = (
+            f"{self.scratch.name} leaves for {next_loc} after {poss} Queen drag attempt on "
+            f"{target_name} fails against the King's lockdown."
+          )
+          table.add_table_event((self.scratch.name, target_name, event_msg, self.scratch.curr_time, set([self.scratch.name, target_name, "Queen", "King"])))
+          return
+        self.scratch.ability_active = True
         table.removal_targets.add((None, self.scratch.name, action_role, next_loc))
         table.removal_targets.add((self.scratch.name, target_name, action_role, next_loc))
-        special_circumstance = f"the Queen has just activated {poss} ability, chose you as the target, and are about to drag you to depart to the {next_loc}, as parting words,"
+        special_circumstance = (
+          f"the Queen has just successfully activated {poss} ability, chose you as the target, and is about to drag you to depart to the {next_loc}, as parting words: "
+          "(For this occasion, the Queen ability has succeeded; do not claim or imply that this current drag was nullified just because an earlier Queen lock or drag was broken)"
+        )
         target.speak(table, special_circumstance, consume_cooldown=False)
         event_msg = f"{self.scratch.name} reveals {self.role_card_text(role='Queen')} and leaves for {next_loc} while dragging {target_name} with {obj} using {poss} ability."
         table.add_table_event((self.scratch.name, target_name, event_msg, self.scratch.curr_time, set([self.scratch.name, target_name])))
@@ -925,7 +1300,7 @@ class Persona:
         table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
 
       elif action_role == "Priest":
-        if target.scratch.role not in target.scratch.cards_slot:
+        if not has_own_role_card(target):
           special_circumstance = f"the Priest {self.scratch.name} is trying to use {poss} ability on you but you don't have your role card with you thus want to use this to prove you're immune,"
           target.speak(table, special_circumstance)
         else:
@@ -934,31 +1309,14 @@ class Persona:
           act_desp = f"the Priest {self.scratch.name} forces {target_name} to reveal {self.role_card_text(target, target.scratch.role)}"
           table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
-      elif action_role == "Bishop":
-        guess = self.guess_family_bishop(target, table)["guess"]
-        special_circumstance = f"you, as Bishop, have just made an internal guess that {target_name}'s family is {guess}, which you now want to annnounce to the target and to the table"
-        if guess != ROLE_DICT[target.scratch.role]["family"]:
-          target.respond_to_wrong_bishop_guess(self, guess, table)
-        else:
-          target_choice_context = (
-            f"the Bishop {self.scratch.name} correctly guessed your family as {guess}; "
-            "you, the target of the Bishop ability, must choose which other table to leave for"
-          )
-          next_loc = target.select_ability_destination(table, retrieved_all_tables, target_choice_context)
-          special_circumstance = f"you have just been correctly guessed by the Bishop {self.scratch.name} as family {guess} and now have to leave for {next_loc}"
-          table.removal_targets.add((self.scratch.name, target_name, action_role, next_loc))
-          target.speak(table, special_circumstance, consume_cooldown=False)
-          act_desp = f"the Bishop {self.scratch.name} correctly guesses {target_name}'s family as {guess} and the latter has to leave for {next_loc}"
-          table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
-
     elif final_option == "reveal":
-      if action_role not in self.scratch.cards_slot:
+      if not self.has_own_card(action_role):
         act_desp = f"{self.scratch.name} tries to reveal {self.role_card_text(role=action_role)}, but cannot prove it because {subj} does not have that role card."
         table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
         if not self.maybe_stay_silent(table, "they cannot prove their role card right now"):
           self.speak(table, f"you want to reveal your {action_role} card, but you cannot prove it because you do not currently have your role card")
         return
-      self.speak(
+      reveal_speech = self.speak(
         table,
         with_optional_speaking_reasoning(
           with_winning_act_reasoning(
@@ -967,12 +1325,17 @@ class Persona:
           )
         )
       )
-      act_desp = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} without using {poss} ability"
+      if reveal_speech.get("volume") == "practically screaming":
+        act_desp = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} to all tables without using {poss} ability"
+      else:
+        act_desp = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} without using {poss} ability"
       table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name])))
+      if reveal_speech.get("volume") == "practically screaming":
+        self.broadcast_global_reveal_event(table, action_role, act_desp)
       self.resolve_baron_reaction(table, self.scratch.name, act_desp, block_ability=False)
 
     elif final_option == "nun-reveal":
-      if not (self.scratch.role != "Nun" and self.scratch.nun_protected and "Nun" in self.scratch.cards_slot):
+      if not (self.scratch.role != "Nun" and has_nun_protection(self)):
         act_desp = f"{self.scratch.name} tries to show the Nun card protecting {obj}, but cannot produce it."
         table.add_table_event((self.scratch.name, None, act_desp, self.scratch.curr_time, set([self.scratch.name, "Nun"])))
         return
@@ -1011,8 +1374,7 @@ class Persona:
           object in (self.scratch.ability_objects or [])
           or (
             object in table.personas
-            and table.personas[object].scratch.nun_protected
-            and "Nun" in table.personas[object].scratch.cards_slot
+            and has_nun_protection(table.personas[object])
           )
         )
       ) else "baron"
@@ -1026,12 +1388,16 @@ class Persona:
         return False
 
     card_name = "Nun" if kind == "nun" else self.scratch.role
+    card_owner_name = self.scratch.name
     if kind == "nun":
       attempt_desp = f"the Nun {self.scratch.name} asks {object} to return the Nun card and end the protection."
       request_circumstance = f"you are demanding your Nun card back from {object} and ending your protection of them"
     else:
-      attempt_desp = f"{self.scratch.name} asks {object} to return {poss} {card_name} card."
-      request_circumstance = f"you are demanding your {card_name} card back from {object} because you are alone together and they are holding your card"
+      attempt_desp = f"{self.scratch.name} asks {object} whether they can return {poss} {card_name} card after a Baron theft."
+      request_circumstance = (
+        f"you are trying to find out whether {object} is currently the Baron holding your {card_name} card, "
+        "and if so to demand it back because you are alone together"
+      )
     if action_reasoning:
       request_circumstance += (
         f". When you won the internal bid for this retrieve action, your reasoning was: {action_reasoning}"
@@ -1052,30 +1418,41 @@ class Persona:
       missing_holder_circumstance = f"the Nun {self.scratch.name} is demanding the Nun card back from you, but you no longer have it; answer that failed demand in the moment"
       holder_circumstance = f"the Nun {self.scratch.name} is requiring you to return the Nun card now; you have to comply and lose the Nun card protection"
     else:
-      missing_holder_circumstance = f"{self.scratch.name} is demanding {poss} {card_name} card back from you, but you no longer have it; answer that failed demand in the moment"
+      missing_holder_circumstance = f"{self.scratch.name} is asking whether you can return {poss} {card_name} card, but you do not have it; answer that failed demand in the moment"
       holder_circumstance = f"{self.scratch.name} is reclaiming {poss} {card_name} card from you now because you are alone together; you have to comply"
     if kind == "nun":
-      if "Nun" not in table.personas[object].scratch.cards_slot:
+      if not has_card(table.personas[object].scratch.cards_slot, "Nun", self.scratch.name):
         holder.speak(table, missing_holder_circumstance)
         log_failed_retrieval(f"{object} no longer has the Nun card.")
         return False
-    elif self.scratch.role not in table.personas[object].scratch.cards_slot:
+    elif not has_card(table.personas[object].scratch.cards_slot, self.scratch.role, self.scratch.name):
       holder.speak(table, missing_holder_circumstance)
-      log_failed_retrieval(f"{object} no longer has the {self.scratch.role} card.")
+      log_failed_retrieval(f"{object} does not have the {self.scratch.role} card.")
       return False
 
     holder.speak(table, holder_circumstance)
 
-    table.personas[object].scratch.cards_slot.discard(card_name)
-    self.scratch.cards_slot.add(card_name)
+    removed_cards = matching_cards(table.personas[object].scratch.cards_slot, card_name, card_owner_name)
+    if not removed_cards and card_name in table.personas[object].scratch.cards_slot:
+      removed_cards = {card_name}
+    table.personas[object].scratch.cards_slot.difference_update(removed_cards)
+    table.personas[object].scratch.baron_obfuscated_trophy_cards.difference_update(removed_cards)
     if kind == "nun":
-      table.personas[object].scratch.nun_protected = False
+      table.personas[object].scratch.nun_protection_cards.difference_update(removed_cards)
+    self.scratch.cards_slot.update(removed_cards or {card_id(card_name, card_owner_name)})
+    self.scratch.baron_obfuscated_trophy_cards.difference_update(removed_cards)
+    if kind == "nun":
+      table.personas[object].scratch.nun_protected = has_nun_protection(table.personas[object])
       self.scratch.ability_active = False
-      self.scratch.ability_objects = []
-      act_desp = f"the Nun {self.scratch.name} retrieves the Nun card from {object} and revokes protection from {object}."
+      self.scratch.ability_objects = [name for name in self.scratch.ability_objects if name != object]
+      if table.personas[object].scratch.nun_protected:
+        act_desp = f"the Nun {self.scratch.name} retrieves {self.possessive_for()} Nun card from {object}, but {object} remains protected by another Nun card."
+      else:
+        act_desp = f"the Nun {self.scratch.name} retrieves {self.possessive_for()} Nun card from {object} and revokes protection from {object}."
       retrieval_event = (self.scratch.name, object, act_desp, self.scratch.curr_time, set([self.scratch.name, object, card_name]))
       table.add_table_event(retrieval_event)
     else:
+      self.scratch.baron_stolen_card_claims.pop(self.scratch.role, None)
       act_desp = f"{self.scratch.name} retrieves {poss} {card_name} card from {object}."
       retrieval_event = (self.scratch.name, object, act_desp, self.scratch.curr_time, set([self.scratch.name, object, card_name]))
       table.add_table_event(retrieval_event)
@@ -1092,14 +1469,25 @@ class Persona:
     # note: in the win_progress reflection prompt add the baron's progress check
     your_win_progress = self.scratch.win_progress
     held_cards = sorted(self.scratch.cards_slot)
-    own_card_status = "in your hands" if your_role in self.scratch.cards_slot else "not in your hands"
-    other_cards = sorted(set(self.scratch.cards_slot) - {your_role})
-    other_cards_text = ", ".join(other_cards) if other_cards else "none"
+    own_card_status = own_role_card_custody_text(self, self.room)
+    other_cards = sorted(held_non_own_cards(self))
+    other_cards_text = ", ".join(describe_card_for_persona(self, card) for card in other_cards) if other_cards else "none"
     personal_context_msg = self.scratch.get_str_iss()
     for relationship_name, relationship in self.scratch.relationships.items():
       personal_context_msg += f"Your relationship with {relationship_name}: {relationship}\n"
+    self.scratch.nun_protected = has_nun_protection(self)
     nun_protection_status = " You are currently protected by the Nun card.\n" if self.scratch.nun_protected else "\n"
-    personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\nYour own {your_role} card is currently {own_card_status}. You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.{nun_protection_status}"
+    personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\n{own_card_status} You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.{nun_protection_status}"
+    if your_role == "Baron":
+      trophy_cards = sorted(held_trophy_cards(self))
+      trophy_text = ", ".join(describe_card_for_persona(self, card) for card in trophy_cards) if trophy_cards else "none"
+      required_trophies = baron_trophy_requirement()
+      remaining_trophies = max(0, required_trophies - len(trophy_cards))
+      personal_context_msg += (
+        f"BARON TROPHY STATUS: Your own Baron card is NOT a trophy and NEVER counts toward your win condition. "
+        f"Only other players' cards you are holding count. You currently have {len(trophy_cards)} trophy card(s): {trophy_text}. "
+        f"You need {remaining_trophies} more trophy card(s) to reach the required {required_trophies}.\n"
+      )
     return personal_context_msg
 
   

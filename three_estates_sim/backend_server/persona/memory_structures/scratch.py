@@ -63,6 +63,9 @@ class Scratch:
     self.win_progress = None
     self.ability_active = False
     self.nun_protected = False # separate flag needed for this to distinguish between baron-steal and this
+    self.nun_protection_cards = set()
+    self.baron_stolen_card_claims = dict()
+    self.baron_obfuscated_trophy_cards = set()
     self.ability_objects = []
     self.ability_locations = set()
     self.retrieved = None
@@ -117,6 +120,9 @@ class Scratch:
         self.win_progress = scratch_load["win_progress"]
         self.ability_active = scratch_load["ability_active"]
         self.nun_protected = scratch_load["nun_protected"]
+        self.nun_protection_cards = set(scratch_load.get("nun_protection_cards", self.nun_protection_cards))
+        self.baron_stolen_card_claims = dict(scratch_load.get("baron_stolen_card_claims", self.baron_stolen_card_claims))
+        self.baron_obfuscated_trophy_cards = set(scratch_load.get("baron_obfuscated_trophy_cards", self.baron_obfuscated_trophy_cards))
         self.ability_objects = scratch_load["ability_objects"]
         self.ability_locations = set(scratch_load.get("ability_locations", self.ability_locations))
         self.retrieved = scratch_load["retrieved"]
@@ -161,6 +167,9 @@ class Scratch:
     scratch["win_progress"] = self.win_progress
     scratch["ability_active"] = self.ability_active
     scratch["nun_protected"] = self.nun_protected
+    scratch["nun_protection_cards"] = sorted(self.nun_protection_cards)
+    scratch["baron_stolen_card_claims"] = self.baron_stolen_card_claims
+    scratch["baron_obfuscated_trophy_cards"] = sorted(self.baron_obfuscated_trophy_cards)
     scratch["ability_objects"] = self.ability_objects
     scratch["ability_locations"] = sorted(self.ability_locations)
     scratch["retrieved"] = None

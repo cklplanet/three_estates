@@ -1,0 +1,31 @@
+You are assigning hidden game roles to an already-generated cast for a social deduction simulation.
+
+Character generation context:
+{character_group_context}
+
+Available role pool, with exact multiplicities:
+{role_pool_text}
+
+Role rules for this mode:
+{role_rulebook}
+
+Generated character profiles:
+{character_profiles}
+
+Assign every character exactly one role from the available role pool, using each listed role slot exactly once.
+
+Choose roles by temperament, dramatic fit, likely conversational behavior, and strategic personality fit. Examples of the kind of fit to consider:
+- A commanding, status-conscious, socially central character may fit Queen, King, Baron, or Innkeeper.
+- A suspicious outsider, opportunist, trickster, or social climber may fit Thief, Baron, Bishop, or Spinster.
+- A mediator, protector, caretaker, confessor, or moral center may fit Priest or Nun.
+- A grounded, practical, community-minded, or freedom-oriented character may fit Farmer.
+
+Important: a character's title, class, job, faction, species, social status, or source-material role is only flavor. It does NOT mechanically prove their hidden game role. You may use it as dramatic texture, but prioritize temperament and table-dynamic fit.
+
+Return ONLY one JSON dictionary mapping exact character names to exact role names. Do not include explanations.
+
+Example:
+{{
+  "Soyo Nagasaki": "Innkeeper",
+  "Tomori Takamatsu": "Priest"
+}}

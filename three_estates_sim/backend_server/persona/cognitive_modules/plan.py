@@ -63,7 +63,7 @@ def remember_movement_reasoning(persona, table, requested_option, final_option, 
   )
 
 
-def bid(persona, table):
+def bid(persona, table, action_context=""):
   table_size = len(table.personas.keys())
   role = persona.scratch.role
   persona.scratch.current_bidding_scores = dict()
@@ -75,7 +75,7 @@ def bid(persona, table):
   retrieval_options = persona.card_retrieval_options(table)
   if retrieval_options:
     retrieve_bid_dict = prompt_dict(
-      run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options),
+      run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, action_context=action_context),
       {"reasoning": "I will not spend the table's attention retrieving a card right now.", "bid": "0"}
     )
     persona.scratch.current_bidding_reasonings['retrieve'] = retrieve_bid_dict["reasoning"]
@@ -83,7 +83,7 @@ def bid(persona, table):
     persona.scratch.current_bidding_scores['retrieve'] = retrieve_bid
     debug_bid(persona, table, "retrieve", retrieve_bid, retrieve_bid_dict["reasoning"])
   # Check conditions for ability being allowed
-  if role in persona.scratch.cards_slot:
+  if has_own_role_card(persona, role):
     if (
         table_size > 1 and (
           (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or
@@ -97,7 +97,7 @@ def bid(persona, table):
     ):
         # If conditions are satisfied, allow ability bidding
         ability_bid_dict = prompt_dict(
-          run_gpt_prompt_act_bidding_ability(persona, table),
+          run_gpt_prompt_act_bidding_ability(persona, table, action_context=action_context),
           {"reasoning": "I do not have a clear ability play right now.", "bid": "0"}
         )
         persona.scratch.current_bidding_reasonings['ability'] = ability_bid_dict["reasoning"]
@@ -105,23 +105,23 @@ def bid(persona, table):
         ability_bid = ABILITY_MULTIPLIER * ability_bid
         persona.scratch.current_bidding_scores['ability'] = ability_bid
         debug_bid(persona, table, "ability", ability_bid, ability_bid_dict["reasoning"])
-  if role != "Nun" and persona.scratch.nun_protected and "Nun" in persona.scratch.cards_slot:
+  if role != "Nun" and has_nun_protection(persona):
     nun_reveal_bid_dict = prompt_dict(
-      run_gpt_prompt_act_bidding_nun_reveal(persona, table),
+      run_gpt_prompt_act_bidding_nun_reveal(persona, table, action_context=action_context),
       {"reasoning": "I do not need to show the Nun card protecting me right now.", "bid": "0"}
     )
     persona.scratch.current_bidding_reasonings['nun-reveal'] = nun_reveal_bid_dict["reasoning"]
     nun_reveal_bid = bounded_int(nun_reveal_bid_dict["bid"], 0)
     persona.scratch.current_bidding_scores['nun-reveal'] = nun_reveal_bid
     debug_bid(persona, table, "nun-reveal", nun_reveal_bid, nun_reveal_bid_dict["reasoning"])
-  if role not in persona.scratch.cards_slot:
+  if not has_own_role_card(persona, role):
     reveal_bid_dict = {
       "reasoning": f"I cannot reveal my {role} card because I do not currently have it.",
       "bid": "0"
     }
   else:
     reveal_bid_dict = prompt_dict(
-      run_gpt_prompt_act_bidding_reveal(persona, table),
+      run_gpt_prompt_act_bidding_reveal(persona, table, action_context=action_context),
       {"reasoning": "I do not need to reveal my card right now.", "bid": "0"}
     )
   persona.scratch.current_bidding_reasonings['reveal'] = reveal_bid_dict["reasoning"]
@@ -134,7 +134,7 @@ def bid(persona, table):
     }
   else:
     speaking_bid_dict = prompt_dict(
-      run_gpt_prompt_act_bidding_speak(persona, table),
+      run_gpt_prompt_act_bidding_speak(persona, table, action_context=action_context),
       {"reasoning": "I have nothing useful to add out loud right now.", "bid": "0"}
     )
   persona.scratch.current_bidding_reasonings['speak'] = speaking_bid_dict["reasoning"]
@@ -149,11 +149,11 @@ def bid(persona, table):
   persona.scratch.current_bidding_scores['speak'] = speaking_bid
   if persona.scratch.current_bidding_scores:
     tie_break_priority = {
-      "retrieve": 4,
-      "speak": 3,
-      "ability": 2,
-      "nun-reveal": 1,
-      "reveal": -1,
+      "retrieve": 5,
+      "ability": 4,
+      "nun-reveal": 3,
+      "reveal": 2,
+      "speak": 1,
     }
     strongest_action = max(
       persona.scratch.current_bidding_scores,

@@ -14,7 +14,12 @@ The conversations you have participated in so far for the last several minutes h
 Current seating, lockdowns, and board context immediately before deciding:
 {current_table_context}
 
+{action_context}
+
 Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, decide how urgently you want to show the Nun card currently protecting you.
+
+Your actual role ability status:
+{ability_msg}
 
 This is a special nun-reveal action:
 - You are showing the Nun card you are holding because someone gave it to you.

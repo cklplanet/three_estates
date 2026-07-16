@@ -14,15 +14,17 @@ The conversations you have participated in so far for the last several minutes h
 Current seating, lockdowns, and board context immediately before deciding:
 {current_table_context}
 
+{action_context}
+
 Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
 - Speak (truthfully, misleadingly, strategically, or just casually)
 - Reveal your card
 - React to others' actions or provocations
 {ability_msg}
 
-For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, how urgently you want to reveal (WITHOUT using your ability) your card and role to everyone at your current table (and typically, only your current table) in particular. For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first.
+For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, how urgently you want to reveal your card (WITHOUT even thinking about using your ability; this bidding is NOT for the kind of reveal that would immediately precede/enable an ability use) and role to everyone at your current table (and typically, only your current table) in particular. For the chance to reveal your card and role next you will place a bid. Highest bidder speaks or acts first.
 Important: this regular reveal bid is only for revealing your own actual role card. It does NOT include showing a Nun card that is protecting you; that is a separate nun-reveal action if available.
-There IS, however, the possibility of you screaming extremely loud to reveal your card to literally the entire board, but in which case you would have to do the equivalent of waving your card in the air to all three tables to see simultaneously and destroying plausible deniability (if you still want deniability then in that case you probably wouldn't want to bid here for a hard reveal).
+There IS, however, the possibility of you screaming extremely loud to reveal your card to all tables: this means deliberately making the hard proof visible/audible to the entire board, like waving your card in the air for every active table to verify simultaneously. If your accompanying reveal line is "practically screaming", the reveal event will be treated as you revealing your role card to all tables; only Barons physically at your current table can react to the card.
 - BID OPTIONS:
   0: Either: I will not reveal my card. No benefit, and it may backfire or make me a target. Or: I have already revealed my card to the same people at the table and there haven't been anyone new coming in the meantime yet.
   1: I’m slightly open to revealing if prompted or if it builds light trust, but there’s no real gain yet. I would rather converse normally to gauge the situation.

@@ -1,6 +1,7 @@
 import datetime
 import os
 import re
+from collections import Counter
 from pathlib import Path
 from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT, SESSIONS_ROOT
 
@@ -71,6 +72,7 @@ MOVEMENT_STAY_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_STAY_COOL
 STARTING_MOVEMENT_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_STEPS", MOVEMENT_LEAVE_COOLDOWN_STEPS)
 STARTING_MOVEMENT_COOLDOWN_RADIUS = max(0, read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_RADIUS", 2))
 ENABLE_SPEAKING_COOLDOWN = read_bool_config("THREE_ESTATES_ENABLE_SPEAKING_COOLDOWN", False)
+USE_LLM_CHAT_POIGNANCY_SCORING = read_bool_config("THREE_ESTATES_USE_LLM_CHAT_POIGNANCY_SCORING", False)
 SPEAKING_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_SPEAKING_COOLDOWN_STEPS", 1)
 SCRATCH_IMPORTANCE_TRIGGER_MAX = read_int_config("THREE_ESTATES_IMPORTANCE_TRIGGER_MAX", 150)
 SCRATCH_RETENTION_BATCHES = read_int_config("THREE_ESTATES_RETENTION_BATCHES", 15)
@@ -99,56 +101,60 @@ CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
 TABLE_LOG_DIR = None
 CHARACTER_LOG_DIR = None
+GAME_MODE = "10"
+
+TIMER_CONFIGS = {
+    "10": {
+        "Castle": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_10_CASTLE_TIMER_MINUTES", 6)),
+        "Forest": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_10_FOREST_TIMER_MINUTES", 7)),
+        "Village": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_10_VILLAGE_TIMER_MINUTES", 8)),
+    },
+    "16": {
+        "Castle": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_16_CASTLE_TIMER_MINUTES", 8)),
+        "Forest": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_16_FOREST_TIMER_MINUTES", 9)),
+        "Village": datetime.timedelta(minutes=read_int_config("THREE_ESTATES_16_VILLAGE_TIMER_MINUTES", 10)),
+    },
+}
+
+ROLE_POOLS = {
+    "10": [
+        "King", "Queen", "Spinster", "Bishop", "Priest",
+        "Farmer", "Thief", "Innkeeper", "Nun", "Baron",
+    ],
+    "16": [
+        "King", "Queen", "Spinster", "Bishop", "Innkeeper",
+        "Priest", "Priest", "Nun", "Nun",
+        "Farmer", "Farmer", "Farmer", "Thief", "Thief",
+        "Baron", "Baron",
+    ],
+}
 
 
 class FatalLLMError(RuntimeError):
     """Raised when an LLM call or required LLM output parse fails."""
 
 
-PREFIX = """You are playing a digital version of a turn-based **social deduction game** involving secret roles, public actions, and table-based conversations.
+class DynamicPrefix:
+    def __str__(self):
+        return build_prefix()
 
-GAME RULES:
-- Roles belong to one of three **families**: Nobility, Commoners, Clergy. Each role has a **unique ability** and a **hidden win condition**.
-- The game takes place across **three timed locations (tables)**: Castle, Forest, and Village.
-- All players must be at one of the three tables at all times (unless in transit). Players may move between tables freely but can only leave a table if its timer is still active—unless affected by certain abilities.
-- To activate an ability, a player must **reveal their card** and be holding it. Some abilities require conditions like being alone with another player.
-- Only one ability may be activated at a table at a time. Players may voluntarily reveal their role to others at their table at any time.
-- **Conversations are always public** at a table.
-- When the game ends (all table timers expire), players win if their **individual win condition** is satisfied—*unless reversed by the Spinster’s guess*.
-- Another player character's status, title, species, class, job, faction, or social role in their original source material (if applicable) is only flavor/context. It does NOT prove or imply their hidden game role or family here. You may make suspicions or jokes based on it, but you must treat the assigned game role/card as separate unless it has been revealed or otherwise learned in-game.
+    def __format__(self, _format_spec):
+        return build_prefix()
 
-ROLE RULEBOOK:
-Every role corresponds to only one player, and each player has only one of the possible roles below:
-- King, Nobility: may reveal the King card at a table and choose a family; matching players ALREADY PRESENT at the table cannot leave until the King leaves or an unaffected player leaves (new arrivals after the declaration are unaffected). If choosing Nobility, the King remains free to move (but will still break the lock if he chooses to depart). Wins if at most one Commoner is in the Castle.
-- Queen, Nobility: when leaving a table, may reveal the Queen card and choose a player to follow to the new table; that player cannot leave until the Queen or someone else leaves that new table. Wins in Castle without King, or in Village with Priest.
-- Spinster, Commoners: when leaving the Forest, may reveal the Spinster card and mark a player there; immune to Baron's block and steal while doing so due to technically being no longer present. After the Spinster leaves, that target must reveal their own role card if they still have it. If the target lacks their own card, the reveal fails. At game end, guesses every other player's role at the Spinster's final table; if all guesses are correct, other players at that table have their win results reversed (that is, if you're losing then after the flip you would win instead, so do consider how close you are to your own win condition before deciding if the Spinster is a threat or ally).
-- Bishop, Clergy: IMMEDIATELY after someone leaves the Bishop's table, may reveal the Bishop card and guess another player's family; if correct, that player must leave. Wins with no Nobility at the final table.
-- Priest, Clergy: when sitting with exactly one other player, may reveal the Priest card to see that player's role; fails if that player lacks their own role card. Wins if at most one person is in the Forest.
-- Farmer, Commoners: Immune to most abilities from any other role, except the following three cases: Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity. Wins with at least two Clergy at the final table.
-- Thief, Commoners: when sitting with exactly one other player, may reveal the Thief card to swap roles/win conditions (and, in case of the target being Baron, receive all the Baron's stolen cards too) with them; does not lose any Nun protection in this case; fails if the target lacks their own role card. The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock. Wins if every other player (than the Thief themself potentially) in the Village loses/doesn't exist.
-- Innkeeper, Commoners: upon entering the Village from elsewhere, may reveal the Innkeeper card and declare; if so, nobody can leave Village until someone else enters or the Innkeeper leaves. Wins with at least two Nobility at the final table.
-- Nun, Clergy: when sitting with exactly one other player, may give the Nun card to them; the holder is protected from other abilities and must return it if the Nun asks. Wins if at least three Commoners win.
-- Baron, Nobility: when another player reveals a card at a table with at least two other players, may reveal the Baron card to block an attempted ability and steal the revealed card; if it was only a reveal, the reveal stands but the Baron may still steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards (but still would be protected by a consciously granted Nun card). Spinster is immune to Baron's ability (but the Spinster-marked person isn't). Baron wins if holding at least three other players' cards (COUNTING a potential willingly granted Nun card).
 
-CARD RETRIEVAL RULES:
-- If the Baron stole your own role card, you keep your role and win condition but cannot use/reveal that card. You can reclaim it when and only when sitting alone with the Baron; the Baron must comply.
-- If the Nun gave you the Nun card, you are protected while holding it, cannot pass it onward, and must return it when the Nun asks (at any time).
-
-ADDITIONAL NOTES:
-- Nun card protection takes the highest precedence, even over Farmer immunity. Even an ability-granted, non-stolen Nun card, however, does NOT protect the Baron from having to return a stolen card when required to.
-"""
+PREFIX = DynamicPrefix()
 
 
 ROLE_DICT = {
     "King": {
         "family": "Nobility",
-        "ability": "When sitting at a table, may choose a family. ALREADY PRESENT members of that family cannot leave the table unless the King or an unaffected player leaves. If nobility is chosen, the King may still move freely (BUT will still break the lock if he chooses to depart).",
+        "ability": "When sitting at a table, may choose a family. ALREADY PRESENT members of that family cannot leave the table (overriding even Queen drag attempts) unless the King or an unaffected player leaves. If nobility is chosen, the King may still move freely (BUT will still break the lock if he chooses to depart).",
         "win_condition": "Wins if at most 1 commoner is in the Castle at game end."
     },
     "Queen": {
         "family": "Nobility",
         "ability": "When leaving a table, may choose a player who must follow to the new table and cannot leave until the Queen or another player leaves it.",
-        "win_condition": "Wins if sitting in the Castle without the King, or in the Village with the Priest at game end."
+        "win_condition": "Wins if sitting in the Castle without the King, or in the Village with at least one Priest at game end."
     },
     "Spinster": {
         "family": "Commoners",
@@ -167,30 +173,124 @@ ROLE_DICT = {
     },
     "Farmer": {
         "family": "Commoners",
-        "ability": "Immune to most abilities from any other role, except the following three cases: Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. except for the Nun’s card-giving, directly forced reveal from Spinster and Priest (because to prove immunity or not you have to reveal you're the Farmer anyway), and the Spinster’s endgame reversal.",
-        "win_condition": "Wins if sitting with at least two clergy members at game end."
+        "ability": "Immune to most abilities from any other role (yes INCLUDING Baron steal etc), except the following three cases: Nun card-giving, directly forced reveal from Spinster and Priest, and Spinster endgame reversal. May need to reveal the Farmer card to prove immunity.",
+        "win_condition": "Wins if sitting with at least 2 clergy member(s) at game end."
     },
     "Thief": {
         "family": "Commoners",
-        "ability": "If sitting with only one other player, may swap roles and win conditions with that player (and, in case of the target being Baron, receive all the Baron's stolen cards too); does not lose any Nun protection in this case. The ability fails if the other player does not have their role card. The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock.",
-        "win_condition": "Wins if every other player (than the Thief themself, potentially) in the Village loses/doesn't exist."
+        "ability": "If sitting with only one other player, may swap roles and win conditions with that player (and, in case of the target being Baron, receive all the Baron's stolen cards too); does not lose any Nun protection in this case. The ability fails if the other player does not have their role card, and Thieves are immune to Thief swaps. The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock.",
+        "win_condition": "Wins if every player in the Village who isn't a Thief loses/doesn't exist."
     },
     "Innkeeper": {
         "family": "Commoners",
-        "ability": "Upon entering the Village from elsewhere, may reveal the Innkeeper card and declare the role. If revealed and declared, no one can leave the Village until either the Innkeeper leaves or another player enters.",
+        "ability": "Upon entering the Village from elsewhere (and ONLY upon entry, NOT including if the Innkeeper has already been in the Village beforehand), may reveal the Innkeeper card and declare the role. If revealed and declared, no one can leave the Village until either the Innkeeper leaves or another player enters.",
         "win_condition": "Wins if sitting with at least two nobles at game end."
     },
     "Nun": {
         "family": "Clergy",
-        "ability": "If sitting with only one other player, may give away the role card. The recipient becomes immune to other abilities and must return the card if asked.",
-        "win_condition": "Wins if at least three commoners win."
+        "ability": "If sitting with only one other player, may give away the role card. The recipient becomes immune to other abilities while holding at least one willingly granted Nun card and must return a Nun's own card if that Nun asks.",
+        "win_condition": "Wins if at least 3 Commoners win."
     },
     "Baron": {
         "family": "Nobility",
-        "ability": "When a player reveals their (own; granted Nun cards don't count) card at a table with at least two other players, may block that ability and steal the card. The Baron does NOT get the abilities (or in case of the Nun card, protection) of the stolen cards (but still would be protected by a consciously granted Nun card). The original player keeps their role but loses the ability until they sit with the Baron alone, which must be allowed.",
-        "win_condition": "Wins if holding at least three other cards at game end (COUNTING a potential willingly granted Nun card)."
+        "ability": "When a player reveals their own role card at a table with at least two other players, may reveal the Baron card to block that ability and steal the revealed card. If it was only a voluntary reveal, the reveal itself still stands but the Baron may still steal the card. The Baron does NOT get the abilities or protection effects of stolen cards. The original player keeps their role and win condition but loses use/reveal of the card until valid retrieval.",
+        "win_condition": "Wins if holding at least 3 cards other than the Baron's own card at game end, counting willingly granted Nun cards."
     }
 }
+
+
+def role_count_summary(mode=None):
+    counts = role_counts_for_mode(mode)
+    return ", ".join(f"{role} x{counts[role]}" for role in ROLE_DICT.keys() if counts.get(role, 0))
+
+
+def mode_label(mode=None):
+    mode = str(mode or GAME_MODE)
+    return "expanded 16-player mode" if mode == "16" else "base 10-player mode"
+
+
+def update_role_dict_for_mode(mode=None):
+    mode = str(mode or GAME_MODE)
+    farmer_clergy = 3 if mode == "16" else 2
+    nun_commoners = 5 if mode == "16" else 3
+    baron_trophies = 4 if mode == "16" else 3
+    nun_stack_note = (
+        " In this mode there are two Nuns; Nun protection can stack, and a target remains protected while holding at least one willingly granted Nun card."
+        if mode == "16" else ""
+    )
+    baron_vs_baron_note = (
+        " In this mode there are two Barons; a Baron can block another non-Nun-protected Baron's reveal/ability and steal that Baron's trophy cards, but NOT that Baron's own Baron role card."
+        if mode == "16" else ""
+    )
+
+    ROLE_DICT["Farmer"]["win_condition"] = f"Wins if sitting with at least {farmer_clergy} clergy member(s) at game end."
+    ROLE_DICT["Thief"]["ability"] = (
+        "If sitting with only one other player, may swap roles and win conditions with that player "
+        "(and, in case of the target being Baron, receive all the Baron's stolen cards too); does not lose any Nun protection in this case. "
+        "The ability fails if the other player does not have their role card, and Thieves are immune to Thief swaps. "
+        "The same two players cannot immediately reverse a Thief swap while the table state remains the same one-on-one pair; "
+        "any table-state change, such as either party leaving or anyone arriving, clears that reverse-swap lock."
+    )
+    ROLE_DICT["Nun"]["ability"] = (
+        "If sitting with only one other player, may give away the role card. "
+        "The recipient becomes immune to other abilities while holding at least one willingly granted Nun card and must return a Nun's own card if that Nun asks."
+        + nun_stack_note
+    )
+    ROLE_DICT["Nun"]["win_condition"] = f"Wins if at least {nun_commoners} Commoners win."
+    ROLE_DICT["Baron"]["ability"] = (
+        "When a player reveals their own role card at a table with at least two other players, may reveal the Baron card to block that ability and steal the revealed card. "
+        "If it was only a voluntary reveal, the reveal itself still stands but the Baron may still steal the card. "
+        "The Baron does NOT get the abilities or protection effects of stolen cards, but can still be protected by a consciously granted Nun card. "
+        "The original player keeps their role and win condition but loses use/reveal of the card until valid retrieval."
+        + baron_vs_baron_note
+    )
+    ROLE_DICT["Baron"]["win_condition"] = f"Wins if holding at least {baron_trophies} cards other than the Baron's own card at game end, counting willingly granted Nun cards."
+
+
+def build_prefix(mode=None):
+    mode = str(mode or GAME_MODE)
+    update_role_dict_for_mode(mode)
+    table_names = table_names_for_mode(mode)
+    table_line = f"This mode uses these tables: {', '.join(table_names)}."
+    if mode == "16":
+        table_line += " Wilderness is connected to Castle, Forest, and Village; no role win condition directly names Wilderness, and it closes when the last of Castle/Forest/Village closes."
+    role_lines = []
+    for role, role_data in ROLE_DICT.items():
+        count = role_counts_for_mode(mode).get(role, 0)
+        if not count:
+            continue
+        count_text = f"{count} instance" + ("" if count == 1 else "s")
+        role_lines.append(
+            f"- {role} ({count_text}), {role_data['family']}: {role_data['ability']} Win: {role_data['win_condition']}"
+        )
+    retrieval_lines = [
+        "- If the Baron stole your own role card, you keep your role and win condition but cannot use/reveal that card. You can reclaim it when and only when sitting alone with the Baron who stole it; the Baron must comply.",
+        "- If the Nun gave you the Nun card, you are protected while holding it, cannot pass it onward, and must return that Nun's own card when that Nun asks.",
+    ]
+    if mode == "16":
+        retrieval_lines.append(
+            "- Baron-vs-Baron trophy theft does not create a Baron role-card retrieval claim, because the target Baron's own role card was not stolen."
+        )
+    return (
+        "You are playing a digital version of a turn-based **social deduction game** involving secret roles, public actions, and table-based conversations.\n\n"
+        "GAME RULES:\n"
+        f"- Active ruleset: {mode_label(mode)}.\n"
+        "- Roles belong to one of three **families**: Nobility, Commoners, Clergy. Each player has exactly one hidden assigned role and one own role card.\n"
+        f"- Exact role pool for this game: {role_count_summary(mode)}.\n"
+        f"- {table_line}\n"
+        "- All players must be at some table at all times unless in transit. Players may move between connected tables freely but can only leave a table if its timer is still active, unless affected by certain abilities.\n"
+        "- To activate an ability, a player must reveal their own role card and be holding it. Some abilities require conditions like being alone with another player.\n"
+        "- Only one ability may be activated at a table at a time. Players may voluntarily reveal their role to others at their table at any time.\n"
+        "- Conversations are always public at a table.\n"
+        "- When the game ends, players win if their individual win condition is satisfied, unless reversed by the Spinster's guess.\n"
+        "- Another player character's status, title, species, class, job, faction, or social role in their original source material is only flavor/context. It does NOT prove or imply their hidden game role or family here.\n\n"
+        "ROLE RULEBOOK FOR THIS MODE ONLY:\n"
+        + "\n".join(role_lines)
+        + "\n\nCARD RETRIEVAL RULES:\n"
+        + "\n".join(retrieval_lines)
+        + "\n\nADDITIONAL NOTES:\n"
+        "- Nun card protection takes the highest precedence, even over Farmer immunity. Even an ability-granted, non-stolen Nun card does NOT protect the Baron from having to return a stolen card when required to.\n"
+    )
 
 
 def thief_swap_pair(player_a, player_b):
@@ -232,13 +332,300 @@ def clear_thief_swap_locks_for_table_change(table, trigger_name=None):
     return cleared
 
 
-TIMERS = {"Castle": datetime.timedelta(minutes=6),
-          "Forest": datetime.timedelta(minutes=7),
-          "Village": datetime.timedelta(minutes=8)}
+TIMERS = {}
+
+
+def set_game_mode(mode):
+    global GAME_MODE
+    mode = str(mode or "10").strip()
+    if mode not in ROLE_POOLS:
+        mode = "10"
+    GAME_MODE = mode
+    TIMERS.clear()
+    TIMERS.update(TIMER_CONFIGS[mode])
+    if mode == "16":
+        TIMERS["Wilderness"] = max(TIMER_CONFIGS[mode].values())
+    update_role_dict_for_mode(mode)
+
+
+def role_pool_for_mode(mode=None):
+    return list(ROLE_POOLS.get(str(mode or GAME_MODE), ROLE_POOLS["10"]))
+
+
+def role_counts_for_mode(mode=None):
+    return Counter(role_pool_for_mode(mode))
+
+
+def table_names_for_mode(mode=None):
+    return list((TIMER_CONFIGS["16"] if str(mode or GAME_MODE) == "16" else TIMER_CONFIGS["10"]).keys()) + (
+        ["Wilderness"] if str(mode or GAME_MODE) == "16" else []
+    )
+
+
+def regular_timed_table_names():
+    return [table for table in TIMERS if table != "Wilderness"]
+
+
+set_game_mode(read_local_env_value("THREE_ESTATES_GAME_MODE") or os.getenv("THREE_ESTATES_GAME_MODE") or "10")
+
+
+def card_id(role, owner_name=None):
+    return f"{role}:{owner_name}" if owner_name else role
+
+
+def retag_card_owner(card, owner_name):
+    return card_id(card_role(card), owner_name)
+
+
+def retag_cards_owner(cards, owner_name):
+    return {retag_card_owner(card, owner_name) for card in set(cards or [])}
+
+
+def card_role(card):
+    return str(card).split(":", 1)[0]
+
+
+def card_owner(card):
+    parts = str(card).split(":", 1)
+    return parts[1] if len(parts) == 2 else None
+
+
+def owned_role_card(persona, role=None):
+    role = role or persona.scratch.role
+    return card_id(role, persona.scratch.name)
+
+
+def card_matches(card, role, owner_name=None):
+    if card == role and owner_name is None:
+        return True
+    if card_role(card) != role:
+        return False
+    return owner_name is None or card_owner(card) == owner_name
+
+
+def matching_cards(cards, role, owner_name=None):
+    return {card for card in set(cards or []) if card_matches(card, role, owner_name)}
+
+
+def has_card(cards, role, owner_name=None):
+    return bool(matching_cards(cards, role, owner_name))
+
+
+def has_own_role_card(persona, role=None):
+    role = role or persona.scratch.role
+    return has_card(persona.scratch.cards_slot, role, persona.scratch.name) or role in persona.scratch.cards_slot
+
+
+def remove_own_role_card(persona, role=None):
+    role = role or persona.scratch.role
+    removed = matching_cards(persona.scratch.cards_slot, role, persona.scratch.name)
+    if not removed and role in persona.scratch.cards_slot:
+        removed = {role}
+    persona.scratch.cards_slot.difference_update(removed)
+    return removed
+
+
+def add_owned_card(persona, role, owner_name):
+    persona.scratch.cards_slot.add(card_id(role, owner_name))
+
+
+def held_non_own_cards(persona):
+    own = owned_role_card(persona)
+    return {
+        card for card in set(persona.scratch.cards_slot)
+        if card != own and not (card == persona.scratch.role and not card_owner(card))
+    }
+
+
+def held_trophy_cards(persona):
+    return held_non_own_cards(persona)
+
+
+def nun_protection_cards(persona):
+    tracked_cards = set(getattr(persona.scratch, "nun_protection_cards", set()) or set())
+    tracked_cards = {
+        card for card in tracked_cards
+        if card in set(persona.scratch.cards_slot or [])
+        and card_matches(card, "Nun")
+    }
+    if tracked_cards:
+        return tracked_cards
+    if not getattr(persona.scratch, "nun_protected", False):
+        return set()
+    # Legacy saves only had the boolean plus cards_slot. Treat non-own Nun cards
+    # as granted protection only when no explicit protection-card set exists yet.
+    return {
+        card for card in matching_cards(persona.scratch.cards_slot, "Nun")
+        if not card_matches(card, "Nun", persona.scratch.name)
+        and not (card == "Nun" and persona.scratch.role == "Nun")
+    }
+
+
+def has_nun_protection(persona):
+    return bool(getattr(persona.scratch, "nun_protected", False) and nun_protection_cards(persona))
+
+
+def describe_card(card):
+    role = card_role(card)
+    owner = card_owner(card)
+    if owner:
+        return f"{owner}'s {role} card"
+    return f"{role} card"
+
+
+def describe_card_for_persona(persona, card):
+    obfuscated_cards = set(getattr(persona.scratch, "baron_obfuscated_trophy_cards", set()) or set())
+    if card in obfuscated_cards and card in set(getattr(persona.scratch, "cards_slot", set()) or set()):
+        role = card_role(card)
+        role_text = f" ({role})" if role else ""
+        return f"an unidentified trophy card{role_text} taken from another Baron's pile"
+    return describe_card(card)
+
+
+def iter_known_personas(room=None, fallback_persona=None):
+    seen = {}
+    if room is not None:
+        for persona in getattr(room, "personas", {}).values():
+            if persona is not None:
+                seen[persona.scratch.name] = persona
+        for table in getattr(room, "locations", {}).values():
+            for persona in getattr(table, "personas", {}).values():
+                if persona is not None:
+                    seen[persona.scratch.name] = persona
+    if fallback_persona is not None:
+        seen[fallback_persona.scratch.name] = fallback_persona
+    return seen
+
+
+def find_role_card_holder(room, role, owner_name, fallback_persona=None):
+    target_card = card_id(role, owner_name)
+    legacy_match = None
+    for holder_name, holder in iter_known_personas(room, fallback_persona).items():
+        cards = set(getattr(holder.scratch, "cards_slot", set()) or set())
+        if target_card in cards:
+            return holder_name, holder, target_card
+        if role in cards and legacy_match is None:
+            legacy_match = (holder_name, holder, role)
+    if legacy_match:
+        return legacy_match
+    return None, None, target_card
+
+
+def role_card_custody_reason(owner_persona, holder_persona, held_card):
+    if holder_persona is None:
+        return "missing or unknown"
+    owner_name = owner_persona.scratch.name
+    holder_name = holder_persona.scratch.name
+    if holder_name == owner_name:
+        return "in your own hand"
+    if held_card in nun_protection_cards(holder_persona):
+        return f"given by you to {holder_name} as Nun protection"
+    if holder_persona.scratch.role == "Baron":
+        return f"stolen by the Baron {holder_name}"
+    return f"held by {holder_name} for an unclear or legacy reason"
+
+
+def baron_stolen_claim(persona, role=None):
+    role = role or persona.scratch.role
+    claims = getattr(persona.scratch, "baron_stolen_card_claims", {}) or {}
+    raw_claim = claims.get(role)
+    if not raw_claim:
+        return None
+    if isinstance(raw_claim, dict):
+        return {
+            "initial_baron": raw_claim.get("initial_baron") or raw_claim.get("baron") or raw_claim.get("holder"),
+        }
+    return {
+        "initial_baron": str(raw_claim),
+    }
+
+
+def set_baron_stolen_claim(persona, role, baron_name):
+    persona.scratch.baron_stolen_card_claims[role] = {
+        "initial_baron": baron_name,
+    }
+
+
+def own_role_card_custody(persona, room=None):
+    role = persona.scratch.role
+    owner_name = persona.scratch.name
+    holder_name, holder, held_card = find_role_card_holder(room, role, owner_name, persona)
+    return {
+        "role": role,
+        "owner": owner_name,
+        "holder": holder_name,
+        "holder_persona": holder,
+        "card": held_card,
+        "in_own_hand": holder_name == owner_name,
+        "reason": role_card_custody_reason(persona, holder, held_card),
+    }
+
+
+def own_role_card_custody_text(persona, room=None):
+    custody = own_role_card_custody(persona, room)
+    role = custody["role"]
+    holder = custody["holder"]
+    if custody["in_own_hand"]:
+        return f"Your own {role} card is currently in your hands."
+    claim = baron_stolen_claim(persona, role)
+    known_baron = claim.get("initial_baron") if claim else None
+    holder_persona = custody.get("holder_persona")
+    if not holder_persona and holder:
+        holder_persona = iter_known_personas(room, persona).get(holder)
+    if known_baron or (holder_persona is not None and holder_persona.scratch.role == "Baron"):
+        known_baron = known_baron or holder
+        return (
+            f"Your own {role} card was last known to have been stolen by the Baron {known_baron}. "
+            "Its exact current holder is not guaranteed by the system and may have changed through later swaps, steals, or retrievals. "
+            "rely on your memories, public events, current observations, and failed/successful retrieval attempts. "
+            f"You still have the {role} role and win condition, but you cannot reveal or use your own {role} card unless it is actually returned or retrieved."
+        )
+    if holder:
+        return (
+            f"Your own {role} card is currently held by {holder}; reason: {custody['reason']}. "
+            f"You still have the {role} role and win condition, but you cannot reveal or use your own "
+            f"{role} card unless it is returned or retrieved."
+        )
+    return (
+        f"Your own {role} card is not found in any known card slot; treat it as unavailable. "
+        f"You still have the {role} role and win condition, but you cannot reveal or use your own "
+        f"{role} card unless it is recovered."
+    )
 
 
 def game_end_time():
     return max(TIMERS.values())
+
+
+def farmer_clergy_requirement():
+    return 3 if GAME_MODE == "16" else 2
+
+
+def nun_commoner_win_requirement():
+    return 5 if GAME_MODE == "16" else 3
+
+
+def baron_trophy_requirement():
+    return 4 if GAME_MODE == "16" else 3
+
+
+def role_family_terms():
+    terms = {
+        "nobility", "noble", "nobles",
+        "commoner", "commoners",
+        "clergy", "cleric", "clerics",
+    }
+    for role in ROLE_DICT.keys():
+        role_lower = role.lower()
+        terms.add(role_lower)
+        if role_lower.endswith("y"):
+            terms.add(f"{role_lower[:-1]}ies")
+        elif role_lower.endswith("f"):
+            terms.add(f"{role_lower[:-1]}ves")
+        else:
+            terms.add(f"{role_lower}s")
+    terms.update({"thieves"})
+    return terms
 
 
 def heuristic_poignancy_score(persona, event_type, description, subject=None, obj=None, keywords=None):
@@ -253,6 +640,9 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     lower = text_without_audience.lower()
     subject_text = str(subject or "")
     object_text = str(obj or "")
+
+    if event_type == "chat":
+        return deterministic_chat_poignancy_score(persona, description, subject, obj)
 
     if "is idle" in lower:
         return 1
@@ -301,7 +691,7 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     if has_proof_or_ability:
         return 7
 
-    roles_and_families = set(ROLE_DICT.keys()) | {"nobility", "noble", "commoner", "commoners", "clergy"}
+    roles_and_families = role_family_terms()
     role_pattern = "|".join(re.escape(term.lower()) for term in sorted(roles_and_families, key=len, reverse=True))
     unproven_reveal = (
         event_type == "chat"
@@ -319,6 +709,72 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     if event_type == "event":
         return 3
     if event_type == "thought":
+        return 3
+    return 2
+
+
+def deterministic_chat_poignancy_score(persona, description, subject=None, obj=None):
+    """Cheap deterministic importance score for dialogue memories."""
+    if isinstance(persona, str):
+        persona_name = persona
+        all_names = {persona_name}
+    else:
+        scratch = getattr(persona, "scratch", None)
+        persona_name = getattr(scratch, "name", "") or ""
+        room = getattr(persona, "room", None)
+        all_names = set(getattr(room, "personas", {}).keys()) if room else {persona_name}
+        all_names.add(persona_name)
+
+    text = str(description or "")
+    text = text.split("[People physically present", 1)[0]
+    text = re.sub(r"\baudience=\[[^\]]*\]", "", text)
+    body = text
+    match = re.search(r"\((?:whisper|calm|loud|practically screaming)(?:,[^)]*)?\)\s*(.*)", body, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        body = match.group(1)
+    elif ": " in body:
+        body = body.rsplit(": ", 1)[-1]
+
+    body_lower = body.lower()
+    subject_text = str(subject or "")
+    object_text = str(obj or "")
+
+    roles_and_families = role_family_terms()
+
+    def contains_term(haystack, term):
+        if not term:
+            return False
+        return re.search(rf"(?<!\w){re.escape(str(term).lower())}(?!\w)", haystack) is not None
+
+    def name_aliases(name):
+        aliases = {str(name or "").strip()}
+        parts = re.split(r"\s+", str(name or "").strip())
+        aliases.update(part for part in parts if len(part) >= 3)
+        return {alias for alias in aliases if alias}
+
+    has_role_or_family = any(contains_term(body_lower, term) for term in roles_and_families)
+    own_name_mentioned = bool(persona_name) and (
+        any(contains_term(body_lower, alias) for alias in name_aliases(persona_name))
+        or object_text == persona_name
+    )
+
+    other_names_mentioned = False
+    for name in all_names:
+        if not name or name == persona_name:
+            continue
+        if any(contains_term(body_lower, alias) for alias in name_aliases(name)):
+            other_names_mentioned = True
+            break
+
+    if own_name_mentioned and has_role_or_family:
+        return 9
+    if other_names_mentioned and has_role_or_family:
+        return 8
+    if has_role_or_family:
+        return 5
+    if own_name_mentioned:
+        return 4
+    if other_names_mentioned:
         return 3
     return 2
 
@@ -471,7 +927,10 @@ def write_table_event_log(table_name, event_tuple):
     if keyword_text:
         advanced_line += f" | keywords={keyword_text}"
     append_table_specific_log(table_name, advanced_line)
-    append_character_specific_log(set(keywords or []) | {subject, obj}, advanced_line)
+    character_log_targets = set(keywords or []) | {subject, obj}
+    if subject and f"departing Spinster {subject}" in description:
+        character_log_targets.discard(subject)
+    append_character_specific_log(character_log_targets, advanced_line)
     if CLEAN_DIALOGUE_LOG_PATH is not None:
         with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
             outfile.write(f"[{timestamp}] EVENT ({table_name}): {description}\n")
@@ -655,23 +1114,27 @@ def evaluate_base_win(player_name, player, final_tables, adjusted_results=None):
     if role == "Priest":
         return len(final_tables["Forest"]) <= 1
     if role == "Farmer":
-        return families_at_table["Clergy"] >= 2
+        return families_at_table["Clergy"] >= farmer_clergy_requirement()
     if role == "Innkeeper":
         return families_at_table["Nobility"] >= 2
     if role == "Baron":
-        return len(set(player.scratch.cards_slot) - {role}) >= 3
+        return len(held_trophy_cards(player)) >= baron_trophy_requirement()
     if role == "Nun":
         if adjusted_results is None:
             return False
         return sum(
             1 for name, result in adjusted_results.items()
             if result and role_family(locations_to_player(final_tables)[name].scratch.role) == "Commoners"
-        ) >= 3
+        ) >= nun_commoner_win_requirement()
     if role == "Thief":
         if adjusted_results is None:
             return False
-        village_others = [name for name in final_tables["Village"] if name != player_name]
-        return all(not adjusted_results.get(name, False) for name in village_others)
+        village_non_thieves = [
+            name
+            for name, village_player in final_tables["Village"].items()
+            if village_player.scratch.role != "Thief"
+        ]
+        return all(not adjusted_results.get(name, False) for name in village_non_thieves)
     return False
 
 

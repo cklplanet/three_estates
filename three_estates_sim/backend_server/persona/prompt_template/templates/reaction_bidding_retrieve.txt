@@ -19,14 +19,16 @@ You currently have a valid card retrieval opportunity:
 Current seating, lockdowns, and board context immediately before deciding:
 {current_table_context}
 
+{action_context}
+
 Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, decide how strongly you want to spend the table's attention right now to retrieve the card.
 Current table leave timer status: {table_time_left}
 There are {total_time_left} until the game ends entirely.
 
 Use exactly one of these bid values:
-- 0: not at all
-- 3: could be useful
-- 8: very necessary
+- 0: not at all. For Baron-theft retrieval, use this if you do not think the card could plausibly be in this person's hands. For Nun retrieval, use this if you do not want the Nun card back right now.
+- 3: uncertain probe. For Baron-theft retrieval, use this if Thief swaps, Baron steals/countersteals, movement, or imperfect memory make it useful to check whether this person might have the card. For Nun retrieval, use this if getting the Nun card back could be useful but is not urgent.
+- 8: urgent retrieval. Use this if you are desperate to retrieve your card now, if this person was literally the Baron who stole it and nothing you know suggests it moved elsewhere, or if your memories/observations indicate this person is currently where your card ended up.
 Return ONLY the json dict below.
 
 - "reasoning": "string",  // Explain in-character why retrieving now is or is not important in one or two sentences. Avoid violent or harmful language.

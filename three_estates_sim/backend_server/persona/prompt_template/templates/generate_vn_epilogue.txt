@@ -1,11 +1,11 @@
 {PREFIX}
 
-The game has ended. Write a post-game visual novel style scene, as if all characters are still physically around the three tables after the results have been revealed.
+The game has ended. Write a post-game visual novel style scene, as if all characters are still physically around the game tables after the results have been revealed.
 
 CONTEXT:
 {epilogue_context}
 
-Write 50 to 60 total lines.
+{line_count_instruction}
 
 Format each line as either:
 - Character Name: character dialogue
