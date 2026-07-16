@@ -37,14 +37,15 @@ class Location:
     def __repr__(self):
         return f"<Location: {self.name} | Connected: {list(self.connected)} | Contents: {self.contents}>"
     
-    def add_table_event(self, event_tuple):
+    def add_table_event(self, event_tuple, log_event=True):
         subject, obj, description, timestamp, keywords = event_tuple
         keywords = set(keywords or []) | event_role_keywords_from_text(description)
         event_tuple = (subject, obj, description, timestamp, keywords)
         self.current_events.append(event_tuple)
         self.event_history.append(event_tuple)
-        write_table_event_log(self.name, event_tuple)
-        print(f"({self.name})" + event_tuple[2])
+        if log_event:
+            write_table_event_log(self.name, event_tuple)
+            print(f"({self.name})" + event_tuple[2])
     
     def add_table_dialogue(self, dialogue_tuple):
         if len(dialogue_tuple) == 6:
@@ -73,6 +74,12 @@ class RoomGraph:
             ("Castle", "Village"),
             ("Forest", "Village"),
         ]
+        if "Wilderness" in TIMERS:
+            edges.extend([
+                ("Wilderness", "Forest"),
+                ("Wilderness", "Castle"),
+                ("Wilderness", "Village"),
+            ])
         for a, b in edges:
             self.connect(a, b)
         

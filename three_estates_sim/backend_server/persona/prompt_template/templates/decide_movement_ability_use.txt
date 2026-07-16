@@ -27,6 +27,8 @@ Current seating, lockdowns, and board context immediately before deciding:
 {current_table_context}
 
 Decide whether you should attach your {role} ability to this departure. Treat your movement reasoning as useful context, but do not use the ability automatically just because you are leaving. Consider whether revealing your card and choosing a target helps your win condition or creates unnecessary risk.
+If your movement reasoning explicitly said or strongly implied that this departure was meant to use your movement-triggered ability, treat that as a soft commitment. You may still answer "no", but only if you have a concrete reason why revealing/using the ability is now worse than the plan you just made. Do not reverse yourself merely by restating generic secrecy/risk concerns that were already true when you made the movement decision.
+If your movement reasoning explicitly said or strongly implied that this departure was meant to be quiet, card-hidden, non-escalatory, or specifically NOT use your movement-triggered ability, treat that as a soft anti-commitment. You may still answer "yes", but only if the current forced-departure context creates a new concrete advantage or emergency that was not already true when you made the movement/destination decision. Do not reverse yourself merely because a valid target exists.
 - Current table leave timer status: {table_time_left}
 - There are {total_time_left} until the game ends entirely.
 

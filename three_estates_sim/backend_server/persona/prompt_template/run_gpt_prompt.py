@@ -46,10 +46,10 @@ def movement_duration_hint(persona=None):
   if endgame_mode:
     return (
       f"Endgame timing note: two tables are locked, so every departure, bidding, and arrival phase now advances "
-      f"the timer by {ENDGAME_SECONDS_PER_PHASE} seconds each, using this faster endgame timescale."
+      f"the timer by {ENDGAME_SECONDS_PER_PHASE} seconds each"
     )
   return (
-    f"Physically moving from one table to another takes {2 * SIM_SECONDS_PER_STEP} seconds total (but the game timer having less than that left, even less than one second, STILL counts as you being able to make it to your final destination table 'in time', so that you WILL have a table in the end and won't be 'caught in transit'). \n"
+    f"Physically moving from one table to another takes {2 * SIM_SECONDS_PER_STEP} seconds total (but the game timer having less than that left, even less than one second, STILL counts as you being able to make it to your final destination table 'in time'. You WILL have a table in the end if this happens, so don't worry about being 'caught in transit'). \n"
     f"If you stay here then you implicitly commit to staying for at least around {2 * MOVEMENT_STAY_COOLDOWN_STEPS * SIM_SECONDS_PER_STEP} more seconds; and if you move then you implicitly commit to staying at your destination for at least around {2 * MOVEMENT_LEAVE_COOLDOWN_STEPS * SIM_SECONDS_PER_STEP} seconds."
   )
 
@@ -91,13 +91,13 @@ def format_table_lockdown_status(table, persona_name=None, indent=""):
       family_text = ", ".join(sorted(families))
       if persona_name and benefactor == persona_name:
         lines.append(
-          f"{indent}- Your {role} ability is maintaining a family-wide lockdown against {family_text} at this table. "
-          "The affected players are not listed here.\n"
+          f"{indent}- Your {role} ability is maintaining a snapshot lockdown against one or more originally present {family_text} player(s) at this table. "
+          "The affected players are not listed here. Do not assume every currently seated member of that family is locked; same-family players who arrived after your declaration were not caught by it.\n"
         )
       else:
         lines.append(
-          f"{indent}- {benefactor}'s {role} ability is maintaining a family-wide lockdown against {family_text} at this table. "
-          "The affected players are not listed here.\n"
+          f"{indent}- {benefactor}'s {role} ability is maintaining a snapshot lockdown against one or more originally present {family_text} player(s) at this table. "
+          "The affected players are not listed here. Do not assume every currently seated member of that family is locked; same-family players who arrived after the declaration were not caught by it.\n"
         )
 
   if not visible_locks and not king_locks_maintained_by_persona:
@@ -211,6 +211,23 @@ def run_gpt_prompt_generate_character(character_group_context, existing_characte
   
   if output != False: 
     return output, [output, prompt, data]
+
+
+def run_gpt_prompt_assign_immersion_roles(character_group_context, character_profiles, role_pool_text, role_rulebook, test_input=None, verbose=False):
+  data = {
+    "character_group_context": character_group_context,
+    "character_profiles": character_profiles,
+    "role_pool_text": role_pool_text,
+    "role_rulebook": role_rulebook,
+  }
+
+  prompt_template = "persona/prompt_template/templates/assign_immersion_roles.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
+  if output != False:
+    return output, [output, prompt, data]
   
 
 def run_gpt_prompt_generate_relationship(character_group_context, persona1, persona2, test_input=None, verbose=False): 
@@ -231,10 +248,11 @@ def run_gpt_prompt_generate_relationship(character_group_context, persona1, pers
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_generate_vn_epilogue(epilogue_context, test_input=None, verbose=False):
+def run_gpt_prompt_generate_vn_epilogue(epilogue_context, line_count_instruction="Write 50 to 60 total lines.", test_input=None, verbose=False):
   data = {
     "PREFIX": PREFIX,
-    "epilogue_context": epilogue_context
+    "epilogue_context": epilogue_context,
+    "line_count_instruction": line_count_instruction,
   }
   prompt_template = "persona/prompt_template/templates/generate_vn_epilogue.txt"
   prompt = read_prompt_template(prompt_template)
@@ -358,13 +376,20 @@ def run_gpt_prompt_thought_poignancy(persona, thought_description, test_input=No
   
 
 
-def run_gpt_prompt_act_bidding_ability(persona, table, test_input=None, verbose=False): 
-  data = get_bidding_common_data(persona, table)
+def run_gpt_prompt_act_bidding_ability(persona, table, action_context="", test_input=None, verbose=False): 
+  data = get_bidding_common_data(persona, table, action_context=action_context)
   if persona.scratch.role == "Innkeeper":
     data["ability_bid_action_clarification"] = (
       "For Innkeeper specifically, bidding for your ability here means bidding to leave your current table for the Village, "
       "no matter where you currently are outside the Village. You are NOT required to reveal your role or card at the departure table (unless you choose to verbally, non-bindingly do so at the departure table); "
       "the real Innkeeper reveal/declaration, if you choose to make it, happens only after you arrive at the Village."
+    )
+  elif persona.scratch.role == "King":
+    data["ability_bid_action_clarification"] = (
+      "For King specifically, your ability is a snapshot of players physically seated at your current table right now. "
+      "It can only lock already-present members of the chosen family. It does NOT trap people currently in transit, people you expect to arrive later, or people at other tables; later arrivals are unaffected and may leave normally unless you use the ability again after they are seated. "
+      "If you already have a King lockdown active, do not infer that every currently seated member of the locked family is affected; only the original hidden targets from the moment of declaration are locked, and later arrivals of that family may still be free. "
+      "Bid for this only if locking currently seated people is useful on its own."
     )
   else:
     data["ability_bid_action_clarification"] = (
@@ -385,8 +410,8 @@ def run_gpt_prompt_act_bidding_ability(persona, table, test_input=None, verbose=
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_act_bidding_reveal(persona, table, test_input=None, verbose=False): 
-  data = get_bidding_common_data(persona, table)
+def run_gpt_prompt_act_bidding_reveal(persona, table, action_context="", test_input=None, verbose=False): 
+  data = get_bidding_common_data(persona, table, action_context=action_context)
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_reveal.txt"
   prompt = read_prompt_template(prompt_template)
@@ -398,8 +423,8 @@ def run_gpt_prompt_act_bidding_reveal(persona, table, test_input=None, verbose=F
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_act_bidding_nun_reveal(persona, table, test_input=None, verbose=False):
-  data = get_bidding_common_data(persona, table)
+def run_gpt_prompt_act_bidding_nun_reveal(persona, table, action_context="", test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table, action_context=action_context)
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_nun_reveal.txt"
   prompt = read_prompt_template(prompt_template)
@@ -411,7 +436,7 @@ def run_gpt_prompt_act_bidding_nun_reveal(persona, table, test_input=None, verbo
     return output, [output, prompt, data]
 
 
-def get_bidding_common_data(persona, table):
+def get_bidding_common_data(persona, table, action_context=""):
   retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = persona.scratch.retrieved
   seen_context_descriptions = set()
   seen_node_ids = set()
@@ -539,6 +564,7 @@ def get_bidding_common_data(persona, table):
     "PREFIX": PREFIX,
     "personal_context_msg": personal_context_msg,
     "current_table_context": current_table_context,
+    "action_context": f"Immediate action context:\n{action_context}\n" if action_context else "",
     "ability_msg": ability_msg,
     "recent_conversation": recent_conversation,
     "current_table_events": current_table_events,
@@ -556,8 +582,8 @@ def get_bidding_common_data(persona, table):
   
 
 
-def run_gpt_prompt_act_bidding_speak(persona, table, test_input=None, verbose=False):
-  data = get_bidding_common_data(persona, table)
+def run_gpt_prompt_act_bidding_speak(persona, table, action_context="", test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table, action_context=action_context)
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_speaking.txt"
   prompt = read_prompt_template(prompt_template)
@@ -568,8 +594,8 @@ def run_gpt_prompt_act_bidding_speak(persona, table, test_input=None, verbose=Fa
   if output != False: 
     return output, [output, prompt, data]
   
-def run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, test_input=None, verbose=False):
-  data = get_bidding_common_data(persona, table)
+def run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, action_context="", test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table, action_context=action_context)
   option_lines = ""
   for option in retrieval_options:
     option_lines += f"- {option['description']}\n"
@@ -587,17 +613,41 @@ def run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, test_
 
 def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_input=None, verbose=False): 
   #retrieved_all_tables format: {table_name: {persona_name: {"events": list of event nodes, "thoughts": list of event nodes}}}
+  _retrieved_self, _retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, _all_tables = persona.scratch.retrieved
   external_table_context = ""
+  seen_context_descriptions = set()
   seen_node_ids = set()
+  movement_semantic_reminder_cap = 4
+
+  def context_key(description):
+    return " ".join(str(description or "").split())
+
+  def claim_context(description, aliases=None):
+    keys = [context_key(description)]
+    if aliases:
+      keys.extend(context_key(alias) for alias in aliases)
+    keys = [key for key in keys if key]
+    if not keys or any(key in seen_context_descriptions for key in keys):
+      return False
+    seen_context_descriptions.update(keys)
+    return True
 
   def claim_node(node):
     node_id = getattr(node, "node_id", None)
-    if not node_id:
-      return True
+    description = getattr(node, "description", "")
+    if not claim_context(description):
+      return False
     if node_id in seen_node_ids:
       return False
-    seen_node_ids.add(node_id)
+    if node_id is not None:
+      seen_node_ids.add(node_id)
     return True
+
+  def format_movement_memory_line(node):
+    time_ago = timedelta_to_natural(persona.scratch.curr_time - node.created)
+    if node.type == "thought":
+      return f"\t(past private thought from {time_ago} ago; not necessarily current) {node.description}\n"
+    return f"\t(past memory from {time_ago} ago; not necessarily current) {node.description} at the {node.table} table\n"
 
   for table_name, dict in retrieved_all_tables.items():
     table_timer_left = table_leave_timer_status(table_name, persona.scratch.curr_time)
@@ -643,11 +693,33 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
   for timestamp_dict in persona.scratch.recent_conversation:
     timestamp, timestamp_events = timestamp_dict
     for event in timestamp_events:
+      if not claim_context(event.description):
+        continue
       time_ago = timedelta_to_natural(persona.scratch.curr_time - event.created)
       new_line = f"({time_ago} ago)"+ event.description + f" at the {event.table} table\n"
       recent_conversation += new_line
   if not recent_conversation:
     recent_conversation = "No dialogue or table events have been perceived yet.\n"
+
+  movement_semantic_reminder_lines = []
+  for related_dict in [self_retrieved_lines_related, other_retrieved_lines_related]:
+    for _line, event_list in related_dict.items():
+      for event in event_list:
+        if len(movement_semantic_reminder_lines) >= movement_semantic_reminder_cap:
+          break
+        if claim_node(event):
+          movement_semantic_reminder_lines.append(format_movement_memory_line(event))
+      if len(movement_semantic_reminder_lines) >= movement_semantic_reminder_cap:
+        break
+    if len(movement_semantic_reminder_lines) >= movement_semantic_reminder_cap:
+      break
+
+  movement_semantic_reminders = ""
+  if movement_semantic_reminder_lines:
+    movement_semantic_reminders = (
+      "Recent lines also semantically remind you of these older memories; use them only if they matter for where to move next:\n"
+      + "".join(movement_semantic_reminder_lines)
+    )
 
   data = {
     "PREFIX": PREFIX,
@@ -655,6 +727,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "external_table_context": external_table_context,
     "ability_msg": ability_msg,
     "recent_conversation": recent_conversation,
+    "movement_semantic_reminders": movement_semantic_reminders,
     "current_table": current_table,
     "other_options": other_options,
     "movement_duration_hint": movement_duration_hint(persona),
@@ -683,7 +756,10 @@ def run_gpt_prompt_select_ability_target(persona, table, ability_reasoning="", t
     family_options = set()
     for player_name, player in table.personas.items():
       family_options.add(ROLE_DICT[player.scratch.role]["family"])
-    ability_target_info += "as King, you can select one of the families present at the table as target:\n"
+    ability_target_info += (
+      "as King, you can select one of the families physically present at the table right now as target. "
+      "This only affects already-seated players of that family; it does not wait for players in transit or later arrivals:\n"
+    )
     family_options = ", ".join(list(family_options))
     ability_target_info += family_options
   elif persona.scratch.role == "Spinster" or persona.scratch.role == "Queen" or persona.scratch.role == "Bishop":
@@ -753,12 +829,12 @@ def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, 
   actual_family = ROLE_DICT[persona.scratch.role]["family"]
   card_status = (
     f"you have your {persona.scratch.role} card and can hard reveal it"
-    if persona.scratch.role in persona.scratch.cards_slot
+    if has_own_role_card(persona)
     else f"you do not currently have your {persona.scratch.role} card, so hard reveal is not available"
   )
   hard_reveal_option = (
     '- "hard reveal": reveal your actual role card to prove the Bishop was wrong.'
-    if persona.scratch.role in persona.scratch.cards_slot
+    if has_own_role_card(persona)
     else f'- "hard reveal": (not available right now because you do not have your {persona.scratch.role} role card)'
   )
   data_sub = {
@@ -810,8 +886,51 @@ def run_gpt_prompt_spinster_endgame_guess(persona, table, test_input=None, verbo
     return output, [output, prompt, data_sub]
 
 
-def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_context, test_input=None, verbose=False):
+def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_context, reaction_context="", known_baron_trophy_cards=None, test_input=None, verbose=False):
   data = get_bidding_common_data(persona, table)
+  current_trophies = held_trophy_cards(persona)
+  known_baron_trophy_cards = set(known_baron_trophy_cards or [])
+  blind_baron_trophy_target = len(role_pool_for_mode()) == 16 and revealed_player.scratch.role == "Baron"
+  if blind_baron_trophy_target:
+    potential_gain = set(known_baron_trophy_cards)
+    baron_steal_rule = (
+      "Because the revealed player is another Baron in expanded 16-player mode, your Baron reaction can steal that Baron's trophy cards, "
+      "but it cannot steal that Baron's own Baron role card. No Baron role-card retrieval claim is created by this. "
+      "This prompt does not reveal that Baron's preexisting trophy pile, if any; rely only on cards you saw enter that pile or can infer from your memories."
+    )
+  else:
+    potential_gain = {card_id(revealed_player.scratch.role, revealed_player.scratch.name)}
+    baron_steal_rule = (
+      "Your Baron reaction can steal the revealed player's own role card. The target keeps their role and win condition but loses use/reveal of that card until valid retrieval."
+    )
+  new_trophies = current_trophies | potential_gain
+  current_trophy_text = ", ".join(describe_card_for_persona(persona, card) for card in sorted(current_trophies)) if current_trophies else "none"
+  if blind_baron_trophy_target:
+    known_gain_text = ", ".join(describe_card(card) for card in sorted(known_baron_trophy_cards)) if known_baron_trophy_cards else "none"
+    minimum_trophies = len(new_trophies)
+    baron_trophy_status = (
+      f"Your own Baron card is NOT a trophy and does NOT count toward your Baron win condition. "
+      f"Only other players' cards you are holding count as trophies. "
+      f"You currently have {len(current_trophies)} trophy card(s): {current_trophy_text}. "
+      f"You can clearly identify these trophy card(s) in the other Baron's possession from this immediate steal/countersteal chain: {known_gain_text}. "
+      f"Any other preexisting trophy cards that Baron may or may not hold are not revealed by this prompt; you may reason from your remembered public events, but do not treat the system as giving you a private inventory view. "
+      f"If this succeeds, you would have at least {minimum_trophies} known trophy card(s), plus any hidden trophy cards that Baron actually had. "
+      f"Your required trophy count is {baron_trophy_requirement()}."
+    )
+  else:
+    potential_gain_text = ", ".join(describe_card(card) for card in sorted(potential_gain)) if potential_gain else "none"
+    baron_trophy_status = (
+      f"Your own Baron card is NOT a trophy and does NOT count toward your Baron win condition. "
+      f"Only other players' cards you are holding count as trophies. "
+      f"You currently have {len(current_trophies)} trophy card(s): {current_trophy_text}. "
+      f"This reaction could add {len(potential_gain - current_trophies)} new trophy card(s): {potential_gain_text}. "
+      f"If it succeeds, you would have {len(new_trophies)} trophy card(s) toward the required {baron_trophy_requirement()}."
+    )
+  if not reaction_context:
+    reaction_context = (
+      "This is a primary Baron reaction to another player's reveal or attempted ability. "
+      "If more than one Baron wants to react, the highest Baron reaction bid acts first; tied top bids are broken randomly."
+    )
   data_sub = {
     "PREFIX": PREFIX,
     "personal_context_msg": data["personal_context_msg"],
@@ -826,6 +945,9 @@ def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_co
     "revealed_player_name": revealed_player.scratch.name,
     "revealed_player_role": revealed_player.scratch.role,
     "action_context": action_context,
+    "reaction_context": reaction_context,
+    "baron_steal_rule": baron_steal_rule,
+    "baron_trophy_status": baron_trophy_status,
   }
   prompt_template = "persona/prompt_template/templates/decide_baron_block.txt"
   prompt = read_prompt_template(prompt_template)
@@ -1022,14 +1144,17 @@ def run_gpt_prompt_decide_card_retrieval(persona, table, object, test_input=None
         object in (persona.scratch.ability_objects or [])
         or (
           object in table.personas
-          and table.personas[object].scratch.nun_protected
-          and "Nun" in table.personas[object].scratch.cards_slot
+          and has_card(table.personas[object].scratch.cards_slot, "Nun", persona.scratch.name)
+          and has_nun_protection(table.personas[object])
         )
       )
   ):
     extra_reason = f"you're the Nun and your card and ability is currently possessed by and protecting {object}"
   else: # Baron case
-    extra_reason = f"your card is in {object}'s hands and now due to there being only two people at the table you can ask for it back"
+    extra_reason = (
+      f"your own role card was stolen through a Baron theft and is still unavailable; because you are alone with {object}, "
+      "you can test whether this person is currently the Baron holder of that card and demand it back if so"
+    )
   data["stay_at_table_reason"] = build_stay_at_table_reason(persona, table, [extra_reason])
   prompt_template = "persona/prompt_template/templates/decide_card_retrieval.txt"
   prompt = read_prompt_template(prompt_template)

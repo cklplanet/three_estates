@@ -16,18 +16,32 @@ Current seating, lockdowns, and board context immediately before reacting:
 
 Given that {stay_at_table_reason}, you are holding your Baron card and another player has just revealed a card or attempted an ability at your table.
 
+Reaction context:
+{reaction_context}
+
 The immediate trigger is:
 {action_context}
 
 The revealed player is {revealed_player_name}, whose revealed role card is {revealed_player_role}.
 
-As Baron, you may reveal your Baron card, block an ability if one is being attempted, and steal the revealed player's role card. If this was only a voluntary reveal, the reveal itself still stands, but you may still steal the revealed card.
+As Baron, you may reveal your Baron card, block an ability if one is being attempted, and steal according to the active Baron rule. If this was only a voluntary reveal, the reveal itself still stands, but you may still steal according to the active Baron rule.
 
-Decide whether using your Baron ability right now advances your position, prevents another player from gaining leverage, or creates too much risk for you.
+Active Baron steal rule for this trigger:
+{baron_steal_rule}
+
+Your Baron trophy count for this exact decision:
+{baron_trophy_status}
+
+Decide how strongly you want to use your Baron ability right now.
 - Current table leave timer status: {table_time_left}
 - There are {total_time_left} until the game ends entirely.
 
+Use exactly one of these bid values:
+- 0: not worth it / too risky / do not react.
+- 3: could be useful.
+- 6: crucial.
+
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character whether you should use the Baron ability right now in one or two sentences.
-- "result": "string" // Response is exactly one of: "yes" | "no", all lowercase
+- "reasoning": "string",  // Explain in-character how badly you want this Baron reaction right now in one or two sentences.
+- "bid": "string" // Response is exactly one of: "0" | "3" | "6"

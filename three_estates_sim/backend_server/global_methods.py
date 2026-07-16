@@ -22,17 +22,33 @@ def timedelta_to_natural(delta):
 
 def table_leave_timer_status(table_name, curr_time):
     delta = TIMERS[table_name] - curr_time
+    wilderness_note = ""
+    if table_name == "Wilderness":
+        wilderness_note = (
+            " Wilderness has no independent role-timer; this countdown follows the last regular table "
+            "to close, and players there can leave normally until that shared final closure."
+        )
     if delta < datetime.timedelta(0):
+        if table_name == "Wilderness":
+            return (
+                "Wilderness is closed because the last regular table has closed; players at Wilderness can no longer "
+                "leave by normal movement, but players may still enter that table."
+            )
         return (
             f"{table_name} timer has expired; players at {table_name} can no longer leave by normal movement, "
             "but players may still enter that table."
         )
     if delta == datetime.timedelta(0):
+        if table_name == "Wilderness":
+            return (
+                "Wilderness has less than 1 second left before the last regular table closes; Wilderness will close "
+                "with that final regular table, but players there may still leave only before the next timer check resolves the lockdown."
+            )
         return (
             f"{table_name} has less than 1 second left and is about to close down NOW; "
             "players there may still leave only before the next timer check resolves the lockdown."
         )
-    return f"{timedelta_to_natural(delta)} remaining before players at {table_name} can no longer leave by normal movement."
+    return f"{timedelta_to_natural(delta)} remaining before players at {table_name} can no longer leave by normal movement.{wilderness_note}"
 
 
 def get_other_player_context(table, persona):
@@ -60,7 +76,10 @@ def ability_trigger(persona, table):
             return "the targeted family or families at this table"
         return ", ".join(sorted(families))
 
-    if persona.scratch.role in persona.scratch.cards_slot: # Prerequisite: your card is still with you
+    if not has_own_role_card(persona, role):
+        return f"Your {role} ability is not currently available because you do not have your {role} card.\n"
+
+    if has_own_role_card(persona): # Prerequisite: your card is still with you
         if len(table.personas.keys()) == 2: # those that require one-on-one triggers
             if persona.scratch.role in {"Nun", "Priest"}:
                 trigger_message = "Since you're alone with another player now, you have the option to stay and trigger your ability.\n"
@@ -86,16 +105,20 @@ def ability_trigger(persona, table):
             if persona.scratch.ability_active == False:
                 if persona.scratch.curr_loc == "Village":
                     trigger_message = "Since you're already at the Village, if you want to trigger your ability you must leave and come back again.\n"
+                elif table_size <= 1:
+                    trigger_message = (
+                        "The condition for your Innkeeper ability bid is not currently met: you are alone at this table, "
+                        "so there is no table audience for a departure ability bid. You may still choose to move to the Village through normal movement, "
+                        "and if you enter the Village with your Innkeeper card you will decide there whether to reveal and declare.\n"
+                    )
                 else:
                     trigger_message = "Since you're outside the Village, you have the option to return to the village, reveal your Innkeeper card, and trigger your ability.\n"
             else:
                 ability_objects = ", ".join(persona.scratch.ability_objects)
                 trigger_message = f"Reminder that you're currently holding {ability_objects} hostage and if you leave for another table your lock on {ability_objects} will automatically break.\n"
 
-    if not trigger_message and role != "Innkeeper":
-        if role not in persona.scratch.cards_slot:
-            trigger_message = f"Your {role} ability is not currently available because you do not have your {role} card.\n"
-        elif role in {"Nun", "Thief", "Priest"}:
+    if not trigger_message:
+        if role in {"Nun", "Thief", "Priest"}:
             if role == "Thief" and thief_reverse_swap_locked(table, persona.scratch.name):
                 trigger_message = "The condition for your Thief ability is not currently met: this exact two-player swap cannot be immediately reversed until the table state changes, such as either of you leaving or someone else arriving.\n"
             else:

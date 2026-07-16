@@ -119,9 +119,14 @@ class AssociativeMemory:
       self.embeddings = json.load(open(f_saved + "/embeddings.json"))
 
       nodes_load = json.load(open(f_saved + "/nodes.json"))
-      for count in range(len(nodes_load.keys())): 
-        node_id = f"node_{str(count+1)}"
-        node_details = nodes_load[node_id]
+      sorted_node_details = sorted(
+        nodes_load.values(),
+        key=lambda node: (
+          node.get("node_count", 0),
+          node.get("created", 0) or 0,
+        )
+      )
+      for node_details in sorted_node_details:
 
         node_count = node_details["node_count"]
         type_count = node_details["type_count"]
@@ -138,8 +143,13 @@ class AssociativeMemory:
         o = node_details["object"]
 
         description = node_details["description"]
-        embedding_pair = (node_details["embedding_key"], 
-                          self.embeddings[node_details["embedding_key"]])
+        embedding_key = node_details["embedding_key"]
+        embedding = self.embeddings.get(embedding_key)
+        if embedding is None:
+          fallback_embedding = next(iter(self.embeddings.values()), [])
+          embedding = [0.0] * len(fallback_embedding)
+          self.embeddings[embedding_key] = embedding
+        embedding_pair = (embedding_key, embedding)
         poignancy = node_details["poignancy"]
         keywords = set(node_details["keywords"])
         if node_type == "event":

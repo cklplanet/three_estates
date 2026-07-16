@@ -14,6 +14,8 @@ The conversations you have participated in so far for the last several minutes h
 Current seating, lockdowns, and board context immediately before deciding:
 {current_table_context}
 
+{action_context}
+
 Given that {stay_at_table_reason}, and optionally considering {last_act_reasoning}, please assess the current situation and decide how urgently you will have to respond. While the list of things you can currently potentially say or do next is as follows:
 - Speak (truthfully, misleadingly, strategically, or just casually)
 - Reveal your card
