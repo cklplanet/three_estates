@@ -34,8 +34,6 @@ class Scratch:
     # THE CORE IDENTITY OF THE PERSONA 
     # Base information about the persona.
     self.name = None
-    self.first_name = None
-    self.last_name = None
     self.gender = None
     self.age = None
     # L0 permanent core traits.  
@@ -93,8 +91,6 @@ class Scratch:
         self.curr_loc = scratch_load["curr_loc"]
 
         self.name = scratch_load["name"]
-        self.first_name = scratch_load["first_name"]
-        self.last_name = scratch_load["last_name"]
         self.gender = scratch_load["gender"]
         self.age = scratch_load["age"]
         self.innate = scratch_load["innate"]
@@ -145,8 +141,6 @@ class Scratch:
     scratch["curr_time"] = self.curr_time.total_seconds()
     scratch["curr_loc"] = self.curr_loc
     scratch["name"] = self.name
-    scratch["first_name"] = self.first_name
-    scratch["last_name"] = self.last_name
     scratch["age"] = self.age
     scratch["gender"] = self.gender
     scratch["innate"] = self.innate
@@ -225,11 +219,11 @@ class Scratch:
 
 
   def get_str_firstname(self): 
-    return self.first_name
+    return self.name
 
 
   def get_str_lastname(self): 
-    return self.last_name
+    return ""
 
 
 

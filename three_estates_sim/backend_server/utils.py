@@ -41,6 +41,7 @@ def read_bool_config(key, default):
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER_KEY") or "YOUR_API_KEY_HERE"
 CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
+DIALOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_DIALOGUE_MODEL") or read_local_env_value("THREE_ESTATES_DIALOGUE_MODEL") or "openai/gpt-5.5"
 EPILOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_EPILOGUE_MODEL") or read_local_env_value("THREE_ESTATES_EPILOGUE_MODEL") or "openai/gpt-5.5"
 FALLBACK_LLM_MODEL = os.getenv("THREE_ESTATES_FALLBACK_MODEL") or read_local_env_value("THREE_ESTATES_FALLBACK_MODEL") or "openai/gpt-5.5"
 # Put your name
@@ -88,6 +89,7 @@ RETRIEVED_CURRENT_TABLE_EVENT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEV
 RETRIEVED_CURRENT_TABLE_THOUGHT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_CURRENT_TABLE_THOUGHT_TOTAL_CAP", RETRIEVED_TABLE_THOUGHT_CAP)
 RETRIEVED_FOREIGN_TABLE_EVENT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_FOREIGN_TABLE_EVENT_TOTAL_CAP", RETRIEVED_OTHER_TABLE_EVENT_CAP)
 RETRIEVED_FOREIGN_TABLE_THOUGHT_TOTAL_CAP = read_int_config("THREE_ESTATES_RETRIEVED_FOREIGN_TABLE_THOUGHT_TOTAL_CAP", RETRIEVED_OTHER_TABLE_THOUGHT_CAP)
+TRANSIT_PERSON_MEMORY_CAP = max(0, read_int_config("THREE_ESTATES_TRANSIT_PERSON_MEMORY_CAP", 2))
 NORMAL_TIMER_URGENCY_PHASES = read_int_config("THREE_ESTATES_NORMAL_TIMER_URGENCY_PHASES", 2)
 ENDGAME_TIMER_URGENCY_PHASES = read_int_config("THREE_ESTATES_ENDGAME_TIMER_URGENCY_PHASES", 1)
 SIM_SECONDS_PER_STEP = read_int_config(
@@ -154,11 +156,11 @@ ROLE_DICT = {
     "Queen": {
         "family": "Nobility",
         "ability": "When leaving a table, may choose a player who must follow to the new table and cannot leave until the Queen or another player leaves it.",
-        "win_condition": "Wins if sitting in the Castle without the King, or in the Village with at least one Priest at game end."
+        "win_condition": "Wins if sitting in the Castle without any seated player whose current role is King, or in the Village with at least one seated player whose current role is Priest at game end. Loose King/Priest cards held by other roles do not count as those players being present."
     },
     "Spinster": {
         "family": "Commoners",
-        "ability": "When leaving the Forest, can choose to point to a player there; immune to Baron's block and steal while doing so due to being no longer present. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
+        "ability": "When leaving the Forest (NOT immune to Forest timer lockdown), can choose to point to a player there; immune to Baron's block and steal while doing so due to being no longer present. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
         "win_condition": "If all other players' roles at the Spinster's final table at game end are guessed correctly. In the event of this the win conditions of all other players' at said table are reversed."
     },
     "Bishop": {
@@ -280,6 +282,7 @@ def build_prefix(mode=None):
         f"- {table_line}\n"
         "- All players must be at some table at all times unless in transit. Players may move between connected tables freely but can only leave a table if its timer is still active, unless affected by certain abilities.\n"
         "- To activate an ability, a player must reveal their own role card and be holding it. Some abilities require conditions like being alone with another player.\n"
+        "- A role card's physical location is NOT the location of its role, family, or player. Except when a Thief ability successfully swaps roles, every player keeps their current role, family, and win condition even when their card is held by someone else. Table composition and location-based win conditions count seated players by their current roles, NEVER loose cards: for example, a Baron holding a King card is still only a Baron, and does not make the King present at that table.\n"
         "- Only one ability may be activated at a table at a time. Players may voluntarily reveal their role to others at their table at any time.\n"
         "- Conversations are always public at a table.\n"
         "- When the game ends, players win if their individual win condition is satisfied, unless reversed by the Spinster's guess.\n"
@@ -572,6 +575,15 @@ def own_role_card_custody_text(persona, room=None):
     holder_persona = custody.get("holder_persona")
     if not holder_persona and holder:
         holder_persona = iter_known_personas(room, persona).get(holder)
+    if (
+        holder_persona is not None
+        and custody["card"] in nun_protection_cards(holder_persona)
+    ):
+        return (
+            f"Your own {role} card is currently held by {holder} because you willingly gave it to them as Nun protection. "
+            f"It was not stolen, even if {holder}'s assigned role is Baron. You still have the {role} role and win condition, "
+            f"but you cannot reveal or use your own {role} card until you retrieve it from {holder}."
+        )
     if known_baron or (holder_persona is not None and holder_persona.scratch.role == "Baron"):
         known_baron = known_baron or holder
         return (
@@ -913,7 +925,12 @@ def debug_log(message):
 def write_table_event_log(table_name, event_tuple):
     if DIALOGUE_LOG_PATH is None and CLEAN_DIALOGUE_LOG_PATH is None:
         return
-    subject, obj, description, timestamp, keywords = event_tuple
+    if len(event_tuple) == 6:
+        subject, obj, description, timestamp, keywords, audience = event_tuple
+        audience = set(audience or [])
+    else:
+        subject, obj, description, timestamp, keywords = event_tuple
+        audience = None
     subject = subject or "system"
     obj = obj or "everyone"
     keyword_text = ", ".join(sorted(str(keyword) for keyword in keywords)) if keywords else ""
@@ -927,7 +944,7 @@ def write_table_event_log(table_name, event_tuple):
     if keyword_text:
         advanced_line += f" | keywords={keyword_text}"
     append_table_specific_log(table_name, advanced_line)
-    character_log_targets = set(keywords or []) | {subject, obj}
+    character_log_targets = set(audience) if audience is not None else set(keywords or []) | {subject, obj}
     if subject and f"departing Spinster {subject}" in description:
         character_log_targets.discard(subject)
     append_character_specific_log(character_log_targets, advanced_line)
@@ -991,17 +1008,18 @@ def debug_movement(persona, table, requested_option, final_option, reasoning, su
     )
 
 
-def debug_ability_target(persona, table, requested_target, final_target, ability_reasoning=""):
+def debug_ability_target(persona, table, requested_target, final_target, ability_reasoning="", target_reasoning=""):
     if not debug:
         return
     adjusted = ""
     if requested_target != final_target:
         adjusted = f" | adjusted_from={requested_target}"
     reasoning_text = f" | ability_reasoning={ability_reasoning}" if ability_reasoning else ""
+    target_reasoning_text = f" | target_reasoning={target_reasoning}" if target_reasoning else ""
     debug_log(
         f"[ABILITY-TARGET] t={persona.scratch.curr_time} | table={table.name} | "
         f"character={persona.scratch.name} | role={persona.scratch.role} | "
-        f"target={final_target}{adjusted}{reasoning_text}"
+        f"target={final_target}{adjusted}{reasoning_text}{target_reasoning_text}"
     )
 
 

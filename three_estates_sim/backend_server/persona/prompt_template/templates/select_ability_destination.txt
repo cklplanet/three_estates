@@ -14,6 +14,8 @@ Important temporal rule: the "currently seated" lists are the current visible bo
 Current seating, lockdowns, transit state, and any endgame board context immediately before choosing destination:
 {external_table_context}
 
+{authoritative_occupancy_snapshot}
+
 Given that you now have to leave this table because {special_circumstance}, you must now move to either of the other two tables: {other_options}. Please decide which of the two you should leave for.
 {ability_departure_reasoning}
 Current table leave timer status: {table_time_left}

@@ -16,6 +16,8 @@ Current seating, lockdowns, transit state, and any endgame board context immedia
 
 {movement_semantic_reminders}
 
+{authoritative_occupancy_snapshot}
+
 Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be wanting to prepare to retrieve your card (or create the corresponding conditions for doing so), retrieving intel one table or another, leveraging Spinster location, or strategically breaking a move lock currently on your or another table, etc.. You should typically only choose to leave for another one when you have decided for now you can obtain more information elsewhere or would be safer than at the current table.
 This movement decision only chooses whether you stay or physically move. It does NOT itself use, reveal, or resolve your role ability. If your plan requires using an ability at your current table first (for example a Thief swap, Priest view, Nun gift, Baron steal, Bishop guess, King lock, or Queen/Spinster movement ability), do not describe that ability as already done merely because you are choosing a movement option. Either choose to stay so you can pursue that action through the action-bidding system, or phrase the move as seeking/setting up a future opportunity.
 Also notably, since you can recall only roughly a set number of total memories related to all of a table's occupants no matter the actual crowdedness of a table, simply "cooling your head" - i.e., retreating to a table with fewer people and thus more recallable memory density per person - i.e. people you can "think more clearly about" - is also a valid reason.

@@ -33,8 +33,13 @@ def json_cleanup(output):
       raise ValueError("No JSON object found in output")
 
   json_str = output[start:end]
-  output = json.loads(json_str)
-  return output
+  try:
+    return json.loads(json_str)
+  except json.JSONDecodeError:
+    parsed = ast.literal_eval(json_str)
+    if not isinstance(parsed, dict):
+      raise ValueError("Parsed LLM output is not a dictionary")
+    return parsed
 
 
 def text_cleanup(output):
@@ -46,7 +51,11 @@ def movement_duration_hint(persona=None):
   if endgame_mode:
     return (
       f"Endgame timing note: two tables are locked, so every departure, bidding, and arrival phase now advances "
-      f"the timer by {ENDGAME_SECONDS_PER_PHASE} seconds each"
+      f"the timer by {ENDGAME_SECONDS_PER_PHASE} seconds each. Physically moving to another table therefore takes "
+      f"about {2 * ENDGAME_SECONDS_PER_PHASE} seconds across the departure and bidding phases before arrival resolves. "
+      "However, even if the game has less time remaining than that -- including less than one second -- a confirmed "
+      "departure still reaches its chosen destination through the final-arrival flush before results are calculated. "
+      "You WILL be seated at the destination for endgame resolution and cannot lose merely by being caught in transit."
     )
   return (
     f"Physically moving from one table to another takes {2 * SIM_SECONDS_PER_STEP} seconds total (but the game timer having less than that left, even less than one second, STILL counts as you being able to make it to your final destination table 'in time'. You WILL have a table in the end if this happens, so don't worry about being 'caught in transit'). \n"
@@ -137,6 +146,83 @@ def format_transit_status(room, curr_time, indent=""):
   return "".join(lines)
 
 
+def format_transit_memory_context(persona, claim_node=None, indent=""):
+  if TRANSIT_PERSON_MEMORY_CAP <= 0 or not getattr(persona.room, "transit", None):
+    return ""
+
+  lines = []
+  for transit_name in sorted(persona.room.transit):
+    candidates = set()
+    candidates.update(persona.a_mem.retrieve_relevant_events(transit_name, None))
+    candidates.update(persona.a_mem.retrieve_relevant_events(None, transit_name))
+    candidates.update(persona.a_mem.retrieve_relevant_thoughts(transit_name, None))
+    candidates.update(persona.a_mem.retrieve_relevant_thoughts(None, transit_name))
+    candidates = [
+      node for node in candidates
+      if node.type in {"event", "thought"}
+      and node.created is not None
+      and node.created < persona.scratch.curr_time
+    ]
+    candidates = sorted(
+      candidates,
+      key=lambda node: (
+        getattr(node, "poignancy", 0),
+        node.created,
+        getattr(node, "last_accessed", node.created) or node.created,
+        getattr(node, "node_count", 0),
+      ),
+      reverse=True,
+    )
+
+    memory_lines = []
+    for node in candidates:
+      if claim_node is not None and not claim_node(node):
+        continue
+      time_ago = timedelta_to_natural(persona.scratch.curr_time - node.created)
+      if node.type == "thought":
+        memory_lines.append(
+          f"{indent}\t- Past private thought from {time_ago} ago, not necessarily current: {node.description}\n"
+        )
+      else:
+        table_text = f" at the {node.table} table" if node.table else ""
+        memory_lines.append(
+          f"{indent}\t- Past event memory from {time_ago} ago, not necessarily current: {node.description}{table_text}\n"
+        )
+      if len(memory_lines) >= TRANSIT_PERSON_MEMORY_CAP:
+        break
+    if memory_lines:
+      lines.append(
+        f"{indent}Your own limited event/thought memories about transit player {transit_name} "
+        f"(up to {TRANSIT_PERSON_MEMORY_CAP}; these are history, not live transit actions):\n"
+      )
+      lines.extend(memory_lines)
+  return "".join(lines)
+
+
+def format_authoritative_occupancy_snapshot(room):
+  lines = ["AUTHORITATIVE PHYSICAL OCCUPANCY NOW:\n"]
+  for table_name, table in room.locations.items():
+    seated_names = sorted(table.personas)
+    seated_count = len(seated_names)
+    if seated_names:
+      player_word = "player" if seated_count == 1 else "players"
+      lines.append(
+        f"- {table_name}: {seated_count} seated {player_word} -- {', '.join(seated_names)}\n"
+      )
+    else:
+      lines.append(f"- {table_name}: 0 seated players -- no seated players\n")
+  transit_names = sorted(getattr(room, "transit", {}).keys())
+  transit_text = ", ".join(transit_names) if transit_names else "none"
+  lines.extend([
+    f"- Transit (not seated at any table): {transit_text}\n",
+    "This snapshot is the mechanically authoritative current board state. "
+    "A table is empty only when its count is exactly 0 and it explicitly says 'no seated players.' "
+    "Never remove, relocate, or discount a listed player based on remembered dialogue, past events, suspected movement, "
+    "or your interpretation of where they should be. Historical memories cannot override this snapshot.\n",
+  ])
+  return "".join(lines)
+
+
 def format_endgame_board_context(persona, retrieved_all_tables, format_memory_line, claim_node):
   if not getattr(persona.room, "endgame_mode", False):
     return ""
@@ -189,7 +275,7 @@ def build_stay_at_table_reason(persona, table, extra_reasons=None):
   return "; and ".join(reasons)
 
 
-def run_gpt_prompt_generate_character(character_group_context, existing_character_choices, name_mode, test_input=None, verbose=False): 
+def run_gpt_prompt_generate_character(character_group_context, existing_character_choices, test_input=None, verbose=False):
 
   if not existing_character_choices:
     existing_character_choices = "This is the first generation in the group"
@@ -199,10 +285,7 @@ def run_gpt_prompt_generate_character(character_group_context, existing_characte
     "character_group_context": character_group_context,
     "existing_character_choices":existing_character_choices
   }
-  if name_mode != "single":
-    prompt_template = "persona/prompt_template/templates/generate_persona.txt"
-  else:
-    prompt_template = "persona/prompt_template/templates/generate_persona_single_name.txt"
+  prompt_template = "persona/prompt_template/templates/generate_persona.txt"
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
@@ -248,6 +331,23 @@ def run_gpt_prompt_generate_relationship(character_group_context, persona1, pers
     return output, [output, prompt, data]
 
 
+def run_gpt_prompt_select_relationship_pairs(character_group_context, cast_information, min_pairs, max_pairs, test_input=None, verbose=False):
+  data = {
+    "character_group_context": character_group_context,
+    "cast_information": cast_information,
+    "min_pairs": min_pairs,
+    "max_pairs": max_pairs,
+  }
+
+  prompt_template = "persona/prompt_template/templates/select_relationship_pairs.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
+  if output != False:
+    return output, [output, prompt, data]
+
+
 def run_gpt_prompt_generate_vn_epilogue(epilogue_context, line_count_instruction="Write 50 to 60 total lines.", test_input=None, verbose=False):
   data = {
     "PREFIX": PREFIX,
@@ -288,7 +388,11 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=DIALOGUE_GENERATION_LLM_MODEL,
+  )
   print(output)
   
   if output != False: 
@@ -318,7 +422,11 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=DIALOGUE_GENERATION_LLM_MODEL,
+  )
   #print(output)
   
   if output != False: 
@@ -436,6 +544,39 @@ def run_gpt_prompt_act_bidding_nun_reveal(persona, table, action_context="", tes
     return output, [output, prompt, data]
 
 
+def run_gpt_prompt_act_bidding_unified(persona, table, action_options, action_context="", test_input=None, verbose=False):
+  data = get_bidding_common_data(persona, table, action_context=action_context)
+  if persona.scratch.role == "Innkeeper":
+    data["ability_bid_action_clarification"] = (
+      "For Innkeeper specifically, choosing ability here means choosing to leave your current table for the Village, "
+      "no matter where you currently are outside the Village. You are NOT required to reveal your role or card at the departure table; "
+      "the real Innkeeper reveal/declaration, if you choose to make it, happens only after you arrive at the Village."
+    )
+  elif persona.scratch.role == "King":
+    data["ability_bid_action_clarification"] = (
+      "For King specifically, your ability is a snapshot of players physically seated at your current table right now. "
+      "It can only lock already-present members of the chosen family. It does NOT trap people currently in transit, people you expect to arrive later, or people at other tables."
+    )
+  elif persona.scratch.role in {"Queen", "Spinster"}:
+    data["ability_bid_action_clarification"] = f"Timing note for this movement-based ability: {movement_duration_hint(persona)}"
+  option_lines = []
+  for option in action_options:
+    score_text = " | ".join(str(score) for score in option["scores"])
+    option_lines.append(
+      f"- {option['action']}: {option['description']} Allowed bid scores: {score_text}."
+    )
+  data["action_options"] = "\n".join(option_lines) or "- none: take no action. Allowed bid scores: 0."
+
+  prompt_template = "persona/prompt_template/templates/reaction_bidding_unified.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+
+  if output != False:
+    return output, [output, prompt, data]
+
+
 def get_bidding_common_data(persona, table, action_context=""):
   retrieved_self, retrieved_others, self_retrieved_lines_related, other_retrieved_lines_related, retrieved_all_tables = persona.scratch.retrieved
   seen_context_descriptions = set()
@@ -511,6 +652,7 @@ def get_bidding_common_data(persona, table, action_context=""):
     for thought in other_player_dict["thoughts"]:
       if claim_node(thought):
         current_table_context += format_memory_line(thought, "\t\t")
+  current_table_context += format_transit_memory_context(persona, claim_node)
   current_table_context += format_endgame_board_context(persona, retrieved_all_tables, format_memory_line, claim_node)
   personal_context_msg = persona.get_personal_game_context()
   if persona.scratch.curr_time == datetime.timedelta(0):
@@ -674,6 +816,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
         new_line = "\t\t"+ f"(past private thought from {time_ago} ago; not necessarily current) " + thought.description + "\n"
         external_table_context += new_line
   external_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
+  external_table_context += format_transit_memory_context(persona, claim_node)
   personal_context_msg = persona.get_personal_game_context()
   ability_msg = ability_trigger(persona, table)
 
@@ -728,6 +871,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "ability_msg": ability_msg,
     "recent_conversation": recent_conversation,
     "movement_semantic_reminders": movement_semantic_reminders,
+    "authoritative_occupancy_snapshot": format_authoritative_occupancy_snapshot(persona.room),
     "current_table": current_table,
     "other_options": other_options,
     "movement_duration_hint": movement_duration_hint(persona),
@@ -798,12 +942,23 @@ def run_gpt_prompt_select_ability_target(persona, table, ability_reasoning="", t
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_guess_family_bishop(persona, target, table, test_input=None, verbose=False):
+def run_gpt_prompt_guess_family_bishop(persona, target, table, ability_reasoning="", target_reasoning="", test_input=None, verbose=False):
   data = get_bidding_common_data(persona, table)
   families = sorted({role_data["family"] for role_data in ROLE_DICT.values()})
   ability_target_info = (
     f"as Bishop, you are guessing {target.scratch.name}'s family. "
     f"Choose exactly one of these families: {', '.join(families)}"
+  )
+  prior_reasoning_parts = []
+  if ability_reasoning:
+    prior_reasoning_parts.append(f"When you bid to use your Bishop ability, your reasoning was: {ability_reasoning}")
+  if target_reasoning:
+    prior_reasoning_parts.append(f"When you selected {target.scratch.name} as your target, your reasoning was: {target_reasoning}")
+  prior_reasoning_msg = (
+    "Prior reasoning you should keep consistent with unless new evidence clearly changes your mind:\n"
+    + "\n".join(f"- {part}" for part in prior_reasoning_parts)
+    if prior_reasoning_parts
+    else ""
   )
 
   data_sub = {
@@ -811,7 +966,8 @@ def run_gpt_prompt_guess_family_bishop(persona, target, table, test_input=None, 
     "personal_context_msg": data["personal_context_msg"],
     "current_table_context": data["current_table_context"],
     "recent_conversation": data["recent_conversation"],
-    "ability_target_info": ability_target_info
+    "ability_target_info": ability_target_info,
+    "prior_reasoning_msg": prior_reasoning_msg,
   }
   prompt_template = "persona/prompt_template/templates/guess_family_bishop.txt"
   prompt = read_prompt_template(prompt_template)
@@ -856,7 +1012,11 @@ def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, 
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=DIALOGUE_GENERATION_LLM_MODEL,
+  )
   if output != False:
     return output, [output, prompt, data_sub]
 
@@ -881,7 +1041,11 @@ def run_gpt_prompt_spinster_endgame_guess(persona, table, test_input=None, verbo
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=DIALOGUE_GENERATION_LLM_MODEL,
+  )
   if output != False:
     return output, [output, prompt, data_sub]
 
@@ -1078,6 +1242,7 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
         new_line = "\t\t"+ f"(past private thought from {time_ago} ago; not necessarily current) " + thought.description + "\n"
         external_table_context += new_line
   external_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
+  external_table_context += format_transit_memory_context(persona, claim_node)
   personal_context_msg = persona.get_personal_game_context()
   ability_msg = ability_trigger(persona, table)
   ability_departure_reasoning = (persona.scratch.current_bidding_reasonings or {}).get("ability", "")
@@ -1114,6 +1279,7 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
     "PREFIX": PREFIX,
     "personal_context_msg": personal_context_msg,
     "external_table_context": external_table_context,
+    "authoritative_occupancy_snapshot": format_authoritative_occupancy_snapshot(persona.room),
     "ability_msg": ability_msg,
     "special_circumstance": special_circumstance,
     "ability_departure_reasoning": ability_departure_reasoning_msg,

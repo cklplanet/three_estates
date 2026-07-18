@@ -1,0 +1,25 @@
+You are selecting which character pairs should receive pre-existing relationship summaries for a turn-based social deduction simulation.
+
+Group/cast context:
+{character_group_context}
+
+Full cast:
+{cast_information}
+
+Choose between {min_pairs} and {max_pairs} relationship pairs.
+
+Selection criteria:
+- If the cast contains characters from known works/settings/franchises, strongly prefer pairs with meaningful canonical relationships, shared backstory, rivalry, friendship, romance, mentorship, family ties, faction ties, or famous tension.
+- If several characters come from the same setting, prioritize those same-setting canonical pairs over arbitrary cross-setting pairs.
+- If the cast is a crossover, add only a few cross-setting pairs when the group context strongly implies they would know each other already, or when there are not enough canonical/same-setting pairs.
+- If the characters are original / not from recognizable works of origin, choose varied, plausibly random pairs across the cast so the social graph is not too centralized.
+- Avoid choosing every possible pair. The goal is a useful sparse relationship graph, not total familiarity.
+- Do not pair a character with themself.
+- Use character names exactly as written in the cast list.
+
+Return ONLY this JSON object:
+{{
+  "pairs": [
+    {{"character_1": "exact character name", "character_2": "exact character name", "reason": "brief reason this pair should get a relationship"}}
+  ]
+}}

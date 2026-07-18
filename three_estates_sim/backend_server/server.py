@@ -3,7 +3,11 @@ from room import *
 from utils import *
 from persona.cognitive_modules.plan import *
 from persona.cognitive_modules.perceive import unpack_dialogue, generate_poig_score
-from persona.prompt_template.run_gpt_prompt import run_gpt_prompt_assign_immersion_roles, run_gpt_prompt_generate_vn_epilogue
+from persona.prompt_template.run_gpt_prompt import (
+    run_gpt_prompt_assign_immersion_roles,
+    run_gpt_prompt_generate_vn_epilogue,
+    run_gpt_prompt_select_relationship_pairs,
+)
 from persona.prompt_template.gpt_structure import get_embedding
 import datetime
 import random
@@ -195,8 +199,26 @@ class ThreeEstatesServer:
                 family_text = ", ".join(sorted(cleared_lock_families.get((previous_benefactor, role), {"the targeted family"})))
                 family_note = f" against {family_text}"
             act_desp = f"{previous_benefactor}'s lockdown ability as {role}{family_note} is nullified by {breaker_name} {trigger}ing"
-            nullify_event = (breaker_name, previous_benefactor, act_desp, self.curr_time, set([breaker_name, previous_benefactor]))
-            table.add_table_event(nullify_event)
+            matching_locks = {
+                lock for lock in cleared_locks
+                if lock[0] == previous_benefactor and lock[2] == role
+            }
+            witnesses = set()
+            for lock in matching_locks:
+                witnesses.update(getattr(table, "lockdown_witnesses", {}).pop(lock, set(table.personas.keys())))
+            if not witnesses:
+                witnesses = set(table.personas.keys())
+            nullify_event = (
+                breaker_name,
+                previous_benefactor,
+                act_desp,
+                self.curr_time,
+                set([breaker_name, previous_benefactor]) | witnesses,
+                witnesses,
+            )
+            debug_log(f"[LOCKDOWN-NULLIFIED] t={self.curr_time} | table={table.name} | audience={sorted(witnesses)} | {act_desp}")
+            write_table_event_log(table.name, nullify_event)
+            table.add_table_event(nullify_event, log_event=False)
 
     def active_lock_targets_and_locations(self, benefactor_name, role):
         targets = []
@@ -345,7 +367,7 @@ class ThreeEstatesServer:
             return {}
         if len(table.personas) <= 1:
             return {}
-        if role == "Spinster" and table.name != "Village":
+        if role == "Spinster" and table.name != "Forest":
             return {}
 
         prior_movement_reasoning = exiled_persona.scratch.current_movement_reasoning or ""
@@ -1113,6 +1135,9 @@ class ThreeEstatesServer:
         return values
 
     def deserialize_event_record(self, record):
+        if len(record) == 6:
+            subject, obj, description, timestamp, keywords, audience = record
+            return (subject, obj, description, datetime.timedelta(seconds=timestamp), set(keywords), set(audience))
         subject, obj, description, timestamp, keywords = record
         return (subject, obj, description, datetime.timedelta(seconds=timestamp), set(keywords))
 
@@ -1133,6 +1158,10 @@ class ThreeEstatesServer:
             "event_history": [self.serialize_record(record) for record in table.event_history],
             "removal_targets": [list(target) for target in table.removal_targets],
             "lockdown_targets": [list(target) for target in table.lockdown_targets],
+            "lockdown_witnesses": [
+                {"lock": list(lock), "witnesses": sorted(witnesses)}
+                for lock, witnesses in getattr(table, "lockdown_witnesses", {}).items()
+            ],
             "thief_swap_locks": [sorted(list(pair)) for pair in getattr(table, "thief_swap_locks", set())],
             "incoming_arrivals": [list(arrival) for arrival in table.incoming_arrivals],
             "bishop_trigger": table.bishop_trigger,
@@ -1162,6 +1191,11 @@ class ThreeEstatesServer:
         table.event_history = [self.deserialize_event_record(record) for record in table_state.get("event_history", [])]
         table.removal_targets = {tuple(target) for target in table_state.get("removal_targets", [])}
         table.lockdown_targets = {tuple(target) for target in table_state.get("lockdown_targets", [])}
+        table.lockdown_witnesses = {
+            tuple(entry.get("lock", [])): set(entry.get("witnesses", []))
+            for entry in table_state.get("lockdown_witnesses", [])
+            if isinstance(entry, dict) and len(entry.get("lock", [])) == 3
+        }
         table.thief_swap_locks = {
             frozenset(pair)
             for pair in table_state.get("thief_swap_locks", [])
@@ -1281,7 +1315,7 @@ class ThreeEstatesServer:
 
     def should_start_game_after_generation(self):
         while True:
-            choice = input("Characters are generated. Type 'start' to begin this game now, or 'quit' to save the cast and stop here:\n").strip().lower()
+            choice = input("Characters and their starting relationships are generated. Type 'start' to begin this game now, or 'quit' to save the prepared cast and stop here:\n").strip().lower()
             if choice in {"start", "s", "yes", "y", "continue", "c"}:
                 return True
             if choice in {"quit", "q", "no", "n", "stop"}:
@@ -1372,7 +1406,7 @@ class ThreeEstatesServer:
         )
         return self.validate_immersion_role_assignments(character_profiles, roles, raw_assignment)
 
-    def generate_immersion_cast(self, roles, character_group_context, name_mode):
+    def generate_immersion_cast(self, roles, character_group_context):
         character_profiles = []
         existing_character_names = []
         for index in range(len(roles)):
@@ -1382,7 +1416,6 @@ class ThreeEstatesServer:
             character_dict = self.generate_character_profile(
                 character_group_context,
                 existing_character_choices,
-                name_mode,
                 f"Character {index + 1}",
             )
             character_profiles.append(character_dict)
@@ -1391,7 +1424,7 @@ class ThreeEstatesServer:
         role_assignments = self.assign_roles_by_immersion(character_group_context, character_profiles, roles)
         for character_dict in character_profiles:
             role = role_assignments[character_dict["name"]]
-            self.create_persona_from_character_profile(character_dict, role, character_group_context, name_mode)
+            self.create_persona_from_character_profile(character_dict, role, character_group_context)
             if debug:
                 debug_log(
                     f"[IMMERSION-ROLE] character={character_dict['name']} | role={role} | "
@@ -1419,6 +1452,7 @@ class ThreeEstatesServer:
             target.speak(table, special_circumstance)
             return False
         table.lockdown_targets.add((benefactor, target_name, role))
+        table.lockdown_witnesses[(benefactor, target_name, role)] = set(table.personas.keys())
         self.refresh_lock_holder_state(benefactor, role)
         return True
     
@@ -1431,27 +1465,100 @@ class ThreeEstatesServer:
         p1.scratch.relationships[p2.scratch.name] = relationship
         p2.scratch.relationships[p1.scratch.name] = relationship
 
-    def generate_character_profile(self, character_group_context, existing_character_choices, name_mode, fallback_name):
+    def relationship_pair_count_bounds(self):
+        cast_size = len(self.personas)
+        if cast_size <= 1:
+            return 0, 0
+        max_possible = cast_size * (cast_size - 1) // 2
+        if cast_size >= 16:
+            return min(5, max_possible), min(10, max_possible)
+        return min(3, max_possible), min(6, max_possible)
+
+    def cast_information_for_relationship_selection(self):
+        lines = []
+        for persona in sorted(self.personas.values(), key=lambda p: p.scratch.name):
+            lines.append(
+                f"- {persona.scratch.name}: "
+                f"age={persona.scratch.age}; gender={persona.scratch.gender}; "
+                f"profile={persona.scratch.innate}"
+            )
+        return "\n".join(lines)
+
+    def fallback_relationship_pairs(self, min_pairs, max_pairs):
+        all_pairs = list(itertools.combinations(self.personas.values(), 2))
+        if not all_pairs:
+            return []
+        target_count = random.randint(min_pairs, max_pairs) if max_pairs >= min_pairs else min_pairs
+        return random.sample(all_pairs, min(target_count, len(all_pairs)))
+
+    def select_relationship_pairs(self, character_group_context):
+        min_pairs, max_pairs = self.relationship_pair_count_bounds()
+        if max_pairs <= 0:
+            return []
+        personas_by_name = {persona.scratch.name: persona for persona in self.personas.values()}
+        fallback = self.fallback_relationship_pairs(min_pairs, max_pairs)
+        selection = prompt_dict(
+            run_gpt_prompt_select_relationship_pairs(
+                character_group_context,
+                self.cast_information_for_relationship_selection(),
+                min_pairs,
+                max_pairs,
+            ),
+            {"pairs": []},
+        )
+        selected = []
+        seen = set()
+        for raw_pair in selection.get("pairs", []):
+            if not isinstance(raw_pair, dict):
+                continue
+            name_1 = raw_pair.get("character_1")
+            name_2 = raw_pair.get("character_2")
+            if name_1 not in personas_by_name or name_2 not in personas_by_name or name_1 == name_2:
+                continue
+            key = tuple(sorted([name_1, name_2]))
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append((personas_by_name[name_1], personas_by_name[name_2]))
+            if len(selected) >= max_pairs:
+                break
+        if len(selected) < min_pairs:
+            for p1, p2 in fallback:
+                key = tuple(sorted([p1.scratch.name, p2.scratch.name]))
+                if key in seen:
+                    continue
+                seen.add(key)
+                selected.append((p1, p2))
+                if len(selected) >= min_pairs:
+                    break
+        return selected
+
+    def generate_selected_relationships(self, character_group_context):
+        selected_pairs = self.select_relationship_pairs(character_group_context)
+        if debug:
+            debug_log(
+                f"[RELATIONSHIP-PAIRS] selected="
+                f"{[(p1.scratch.name, p2.scratch.name) for p1, p2 in selected_pairs]}"
+            )
+        for p1, p2 in selected_pairs:
+            self.generate_relationship(character_group_context, p1, p2)
+
+    def generate_character_profile(self, character_group_context, existing_character_choices, fallback_name):
         return prompt_dict(
-            run_gpt_prompt_generate_character(character_group_context, existing_character_choices, name_mode),
+            run_gpt_prompt_generate_character(character_group_context, existing_character_choices),
             {
                 "name": fallback_name,
-                "first_name": fallback_name,
-                "last_name": "",
                 "gender": "unknown",
                 "age": "30",
                 "innate": "is a cautious contestant generated as a fallback for the simulation.",
             }
         )
 
-    def create_persona_from_character_profile(self, character_dict, role, character_group_context, name_mode):
+    def create_persona_from_character_profile(self, character_dict, role, character_group_context):
         persona_path = os.path.join(save_file, character_dict['name'])
         new_persona = Persona(character_dict['name'], self.room, role, folder_mem_saved=persona_path)
         new_persona.scratch.name = character_dict['name']
         new_persona.ensure_own_card_identity()
-        if name_mode != "single":
-            new_persona.scratch.first_name = character_dict['first_name']
-            new_persona.scratch.last_name = character_dict['last_name']
         new_persona.scratch.gender = character_dict['gender']
         new_persona.scratch.age = bounded_int(character_dict['age'], 30, minimum=0)
         new_persona.scratch.innate = character_dict['innate']
@@ -1460,30 +1567,42 @@ class ThreeEstatesServer:
         new_persona.save(persona_path)
         return new_persona
 
-    def generate_character(self, role, character_group_context, existing_character_choices, name_mode, role_label=None):
+    def generate_character(self, role, character_group_context, existing_character_choices, role_label=None):
         role_label = role_label or role
         fallback_name = f"{role_label} Player"
         character_dict = self.generate_character_profile(
             character_group_context,
             existing_character_choices,
-            name_mode,
             fallback_name,
         )
-        return self.create_persona_from_character_profile(character_dict, role, character_group_context, name_mode)
+        return self.create_persona_from_character_profile(character_dict, role, character_group_context)
 
     def session_context_path(self):
         return os.path.join(save_file, SESSION_CONTEXT_FILE)
 
-    def save_character_context(self, character_group_context, name_mode, character_generation_mode="normal"):
+    def save_character_context(
+        self,
+        character_group_context,
+        character_generation_mode="normal",
+        relationship_generation_complete=False,
+    ):
         os.makedirs(save_file, exist_ok=True)
         context_payload = {
             "character_group_context": character_group_context,
-            "name_mode": name_mode,
             "game_mode": self.game_mode,
             "character_generation_mode": character_generation_mode,
+            "relationship_generation_complete": bool(relationship_generation_complete),
         }
         with open(self.session_context_path(), "w") as outfile:
             json.dump(context_payload, outfile, indent=2)
+
+    def mark_relationship_generation_complete(self):
+        context_payload = self.load_character_context_payload()
+        self.save_character_context(
+            context_payload.get("character_group_context", self.load_character_context()),
+            context_payload.get("character_generation_mode", "normal"),
+            relationship_generation_complete=True,
+        )
 
     def load_character_context(self):
         context_path = self.session_context_path()
@@ -1518,8 +1637,6 @@ class ThreeEstatesServer:
             name = scratch.get("name") or filename
             cast.append({
                 "name": name,
-                "first_name": scratch.get("first_name"),
-                "last_name": scratch.get("last_name"),
                 "gender": scratch.get("gender"),
                 "age": scratch.get("age"),
                 "innate": scratch.get("innate"),
@@ -1575,8 +1692,6 @@ class ThreeEstatesServer:
             persona = Persona(character["name"], self.room, role)
             persona.scratch.name = character["name"]
             persona.ensure_own_card_identity()
-            persona.scratch.first_name = character.get("first_name")
-            persona.scratch.last_name = character.get("last_name")
             persona.scratch.gender = character.get("gender")
             persona.scratch.age = character.get("age")
             persona.scratch.innate = character.get("innate")
@@ -1719,6 +1834,7 @@ class ThreeEstatesServer:
             session_mode = self.choose_session_mode()
             resume_from_checkpoint = session_mode == "resume"
             generated_new_characters = session_mode == "new"
+            pending_generated_cast = session_mode == "legacy"
             reused_existing_characters = session_mode in {"reuse_same_roles", "reuse_reroll_roles", "reuse_exact_setup"}
             reuse_exact_setup = session_mode == "reuse_exact_setup"
             if session_mode in {"resume", "legacy"}:
@@ -1727,6 +1843,11 @@ class ThreeEstatesServer:
                 roles = role_pool_for_mode(self.game_mode)
                 self.load_personas_from_session(roles)
                 character_group_context = self.load_character_context()
+                if session_mode == "legacy":
+                    context_payload = self.load_character_context_payload()
+                    pending_generated_cast = not bool(
+                        context_payload.get("relationship_generation_complete", False)
+                    )
                 if character_group_context:
                     for persona in self.personas.values():
                         if not persona.scratch.group_context:
@@ -1748,7 +1869,6 @@ class ThreeEstatesServer:
                     self.configure_game_mode(context_mode)
                 roles = role_pool_for_mode(self.game_mode)
                 character_group_context = context_payload.get("character_group_context", "")
-                name_mode = context_payload.get("name_mode", "")
                 cast = self.collect_cast_from_existing_session()
                 if not cast:
                     raise ValueError(f"No saved characters found in {save_file}")
@@ -1767,7 +1887,6 @@ class ThreeEstatesServer:
                 self.debug_log_path = None
                 self.save_character_context(
                     character_group_context,
-                    name_mode,
                     context_payload.get("character_generation_mode", "normal"),
                 )
                 self.rebuild_clean_cast(
@@ -1783,11 +1902,10 @@ class ThreeEstatesServer:
                 self.choose_game_mode_for_new_cast()
                 roles = role_pool_for_mode(self.game_mode)
                 character_group_context = input("Enter the context in which you generate characters:\n")
-                name_mode = input("Do you want singular names or full names with first and last names etc?\n")
                 character_generation_mode = self.choose_character_generation_mode()
-                self.save_character_context(character_group_context, name_mode, character_generation_mode)
+                self.save_character_context(character_group_context, character_generation_mode)
                 if character_generation_mode == "immersion":
-                    self.generate_immersion_cast(roles, character_group_context, name_mode)
+                    self.generate_immersion_cast(roles, character_group_context)
                 else:
                     existing_character_names = []
                     role_totals = role_counts_for_mode(self.game_mode)
@@ -1800,33 +1918,27 @@ class ThreeEstatesServer:
                         existing_character_choices = ""
                         if existing_character_names:
                             existing_character_choices = ",".join(existing_character_names)
-                        new_character = self.generate_character(role, character_group_context, existing_character_choices, name_mode, role_label=role_label)
+                        new_character = self.generate_character(role, character_group_context, existing_character_choices, role_label=role_label)
                         existing_character_names.append(new_character.scratch.name)
                 self.initialize_dialogue_log()
 
             if not resume_from_checkpoint:
-                if generated_new_characters:
+                if generated_new_characters or pending_generated_cast:
                     self.save_personas_only("character_generation_complete")
-                    if not self.should_start_game_after_generation():
-                        print("Character set saved. Exiting before relationship generation or seating/game start.")
-                        return
                     relationship_flag = input("Do you want at least some of them to know each other beforehand? yes or no\n")
                     if relationship_flag == "yes":
-                        all_pairs = list(itertools.combinations(self.personas.values(), 2))
-                        num_relationships = random.randint(3, 6)
-                        selected_pairs = random.sample(all_pairs, num_relationships)
-                        for p1, p2 in selected_pairs:
-                            self.generate_relationship(character_group_context, p1, p2)
+                        self.generate_selected_relationships(character_group_context)
                     self.save_personas_only("relationship_generation_complete")
+                    self.mark_relationship_generation_complete()
+                    if not self.should_start_game_after_generation():
+                        print("Prepared character set and relationships saved. Exiting before seating/game start.")
+                        return
                 elif reused_existing_characters:
                     relationship_flag = input("Do you want at least some of them to know each other beforehand? yes or no\n")
                     if relationship_flag == "yes":
-                        all_pairs = list(itertools.combinations(self.personas.values(), 2))
-                        num_relationships = min(random.randint(3, 6), len(all_pairs))
-                        selected_pairs = random.sample(all_pairs, num_relationships)
-                        for p1, p2 in selected_pairs:
-                            self.generate_relationship(character_group_context, p1, p2)
+                        self.generate_selected_relationships(character_group_context)
                     self.save_personas_only("relationship_generation_complete")
+                    self.mark_relationship_generation_complete()
 
                 for persona_name, persona in self.personas.items():
                     exact_starting_table = self.exact_setup_table_for(persona) if reuse_exact_setup else None

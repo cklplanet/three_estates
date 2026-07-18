@@ -23,6 +23,16 @@ def unpack_dialogue(utterance):
   return s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat
 
 
+def unpack_event(event):
+  if len(event) == 6:
+    s, o, description, timestamp, keywords, audience = event
+    audience = set(audience or [])
+  else:
+    s, o, description, timestamp, keywords = event
+    audience = set()
+  return s, o, description, timestamp, set(keywords or []), audience
+
+
 def generate_poig_score(persona, event_type, description, subject=None, obj=None, keywords=None):
   if event_type == "chat":
     default_poignancy = heuristic_poignancy_score(persona, event_type, description, subject, obj, keywords)
@@ -74,7 +84,9 @@ def perceive(persona, room):
   persona.scratch.event_cursors[persona.scratch.curr_loc] = len(current_table.event_history)
 
   for event in local_events:
-    s, o, description, timestamp, keywords = event
+    s, o, description, timestamp, keywords, audience = unpack_event(event)
+    if audience and persona.scratch.name not in audience:
+      continue
     event_poignancy = generate_poig_score(persona, "event", description, s, o, keywords)
     desc_embedding_in = description
     if desc_embedding_in in persona.a_mem.embeddings: 

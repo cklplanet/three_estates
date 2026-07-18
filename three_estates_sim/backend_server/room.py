@@ -21,6 +21,7 @@ class Location:
         self.personas = dict()
         self.removal_targets = set() # format: (sub, obj, subj_role, target_table)
         self.lockdown_targets = set() # format: (sub, obj, subj_role)
+        self.lockdown_witnesses = dict() # (sub, obj, subj_role) -> set(persona names present when lock was created)
         self.incoming_arrivals = set() # format: (self, "benefactor"(optional), source_table)
         self.thief_swap_locks = set() # format: frozenset({player_a, player_b}); cleared on table-state change
         self.bishop_trigger = False
@@ -38,9 +39,18 @@ class Location:
         return f"<Location: {self.name} | Connected: {list(self.connected)} | Contents: {self.contents}>"
     
     def add_table_event(self, event_tuple, log_event=True):
-        subject, obj, description, timestamp, keywords = event_tuple
+        if len(event_tuple) == 6:
+            subject, obj, description, timestamp, keywords, audience = event_tuple
+            audience = set(audience or [])
+        else:
+            subject, obj, description, timestamp, keywords = event_tuple
+            audience = None
         keywords = set(keywords or []) | event_role_keywords_from_text(description)
-        event_tuple = (subject, obj, description, timestamp, keywords)
+        if audience is None:
+            event_tuple = (subject, obj, description, timestamp, keywords)
+        else:
+            keywords |= audience
+            event_tuple = (subject, obj, description, timestamp, keywords, audience)
         self.current_events.append(event_tuple)
         self.event_history.append(event_tuple)
         if log_event:

@@ -207,6 +207,11 @@ class Persona:
         continue
       table.lockdown_targets -= matching_locks
       cleared_any = True
+      witnesses = set()
+      for lock in matching_locks:
+        witnesses.update(getattr(table, "lockdown_witnesses", {}).pop(lock, set(table.personas.keys())))
+      if not witnesses:
+        witnesses = set(table.personas.keys())
       locked_targets = sorted(lock[1] for lock in matching_locks)
       keywords = set([stolen_player_name, baron_name, stolen_role] + locked_targets)
       if stolen_role == "King":
@@ -226,7 +231,10 @@ class Persona:
           f"{stolen_player_name}'s lockdown ability as {stolen_role} on {targets_text} is nullified "
           f"because {baron_name} stole {stolen_player.possessive_for()} {stolen_role} card."
         )
-      table.add_table_event((baron_name, stolen_player_name, act_desp, self.scratch.curr_time, keywords))
+      debug_log(f"[LOCKDOWN-NULLIFIED] t={self.scratch.curr_time} | table={table.name} | audience={sorted(witnesses)} | {act_desp}")
+      nullify_event = (baron_name, stolen_player_name, act_desp, self.scratch.curr_time, keywords | witnesses, witnesses)
+      write_table_event_log(table.name, nullify_event)
+      table.add_table_event(nullify_event, log_event=False)
 
     if cleared_any:
       remaining_targets = []
@@ -384,6 +392,31 @@ class Persona:
           act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')} after {target_player.scratch.name}'s reveal and steals the {stolen_role} card."
         self.clear_active_locks_after_card_stolen(target_player.scratch.name, stolen_role, baron_name)
       table.add_table_event((baron_name, target_player.scratch.name, act_desp, self.scratch.curr_time, set([baron_name, target_player.scratch.name, "Baron", stolen_role])))
+      if stolen_role == "Baron":
+        stolen_card_text = ", ".join(describe_card(card) for card in sorted(stolen_cards))
+        if stolen_card_text:
+          victim_reaction_context = (
+            f"the Baron {baron_name} has just successfully stolen your Baron trophy cards from you: "
+            f"{stolen_card_text}. Your own Baron role card was not taken. "
+            "React immediately as the victim of this steal without claiming that you still hold the stolen trophies"
+          )
+        else:
+          victim_reaction_context = (
+            f"the Baron {baron_name} has just resolved a Baron-on-Baron steal against you, but you had no trophy cards "
+            "for them to take and your own Baron role card was not taken. React immediately to that outcome"
+          )
+      else:
+        blocked_text = (
+          f" Your attempted {stolen_role} ability was also blocked before resolving."
+          if block_ability
+          else " Your reveal itself remains public even though the physical card was stolen afterward."
+        )
+        victim_reaction_context = (
+          f"the Baron {baron_name} has just successfully stolen your own {stolen_role} role card from you. "
+          f"You still have the {stolen_role} role, family, and win condition, but you no longer physically hold your role card."
+          f"{blocked_text} React immediately as the victim of this steal"
+        )
+      target_player.speak(table, victim_reaction_context, consume_cooldown=False)
       return stolen_cards
 
     primary_context = (
@@ -607,18 +640,24 @@ class Persona:
       target_dict = prompt_dict(run_gpt_prompt_select_ability_target(self, table, enriched_ability_reasoning), {"target": fallback})
       requested_target = target_dict["target"]
       final_target = requested_target if requested_target in family_options else fallback
-      debug_ability_target(self, table, requested_target, final_target, enriched_ability_reasoning)
+      target_reasoning = target_dict.get("reasoning", "")
+      self.scratch.current_bidding_reasonings["ability_target"] = target_reasoning
+      debug_ability_target(self, table, requested_target, final_target, enriched_ability_reasoning, target_reasoning)
       return final_target
     fallback = possible_targets[0] if possible_targets else self.scratch.name
     target_dict = prompt_dict(run_gpt_prompt_select_ability_target(self, table, enriched_ability_reasoning), {"target": fallback})
     requested_target = target_dict["target"]
     final_target = requested_target if requested_target in possible_targets else fallback
-    debug_ability_target(self, table, requested_target, final_target, enriched_ability_reasoning)
+    target_reasoning = target_dict.get("reasoning", "")
+    self.scratch.current_bidding_reasonings["ability_target"] = target_reasoning
+    debug_ability_target(self, table, requested_target, final_target, enriched_ability_reasoning, target_reasoning)
     return final_target
 
   def guess_family_bishop(self, target, table):
+    ability_reasoning = (self.scratch.current_bidding_reasonings or {}).get("ability", "")
+    target_reasoning = (self.scratch.current_bidding_reasonings or {}).get("ability_target", "")
     return prompt_dict(
-      run_gpt_prompt_guess_family_bishop(self, target, table),
+      run_gpt_prompt_guess_family_bishop(self, target, table, ability_reasoning, target_reasoning),
       {"reasoning": "I have to make my best guess from limited evidence.", "guess": "Commoners"}
     )
 
@@ -812,7 +851,7 @@ class Persona:
     if role == "Spinster":
       ability_attempt_context = (
         f"{self.scratch.name} reveals {self.role_card_text(role='Spinster')} and attempts to use {poss} Spinster ability "
-        f"on {target_name} while leaving the Forest for {destination}."
+        f"on {target_name}, and leaves the Forest for {destination}."
       )
       self.speak(
         table,
@@ -1170,7 +1209,9 @@ class Persona:
               table.add_table_event((other_player_name, None, act_desp, self.scratch.curr_time, set([other_player_name])))
               other_player.speak(table, special_circumstance)
             else:
-              table.lockdown_targets.add((self.scratch.name, other_player_name, action_role))
+              lock = (self.scratch.name, other_player_name, action_role)
+              table.lockdown_targets.add(lock)
+              table.lockdown_witnesses[lock] = set(table.personas.keys())
               self.scratch.ability_objects.append(other_player_name)
               self.scratch.ability_locations.add(table.name)
         act_desp = f"{self.scratch.name} reveals {self.role_card_text(role='King')} and uses {poss} ability to lock down all present {target_name} at {table.name}"
@@ -1188,8 +1229,17 @@ class Persona:
         target.scratch.cards_slot.update(granted_cards)
         target.scratch.nun_protection_cards.update(granted_cards)
         target.scratch.nun_protected = True
+        target.speak(
+          table,
+          (
+            f"the Nun {self.scratch.name} has just successfully given you {poss} Nun card. "
+            "You now physically hold that Nun card and are protected by it, while keeping your own role, family, and win condition unchanged. "
+            "React immediately to accepting this protection without claiming that the Nun card is your own role card"
+          ),
+          consume_cooldown=False,
+        )
         act_desp = f"{self.scratch.name} reveals {self.role_card_text(role='Nun')} and uses {poss} ability by giving {poss} card to protect {target_name}"
-        table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
+        table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name, "Nun"])))
         return
 
       if has_nun_protection(target):

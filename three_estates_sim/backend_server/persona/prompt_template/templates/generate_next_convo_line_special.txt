@@ -28,6 +28,11 @@ Given that {special_circumstance}, please decide exactly what you want to say IM
 - Be threatening or accusatory
 - Or be laconic and cryptic
 - Additionally, you can weaponize the fact that voices at "practically screaming" - NOT just "loud" - volume CAN be potentially heard by other tables (and players transiting in between). Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
+- The special circumstance identifies the one selected action or reaction this line accompanies. Stay within that action and its supplied reasoning; do not bolt on any additional action or unrelated agenda merely because the broader context mentions an opportunity.
+- If the selected action is only speaking, you may discuss, question, bluff about, threaten, propose, request, or demand a future card-backed reveal, Nun-card reveal, ability use, card retrieval, or movement ONLY when doing so serves the winning speech reasoning. Never claim or imply that one of those different actions is mechanically happening, has succeeded, or has been resolved through the spoken line itself.
+- If the selected action is only speaking and you currently hold another player's card, you may agree or promise to return it later, refuse, negotiate, or stall. Do NOT say or imply that you physically hand it back now; wording such as "here is your card," "take it back," or "I just returned it" is reserved for an actual successful retrieval action.
+- A card-return request is mechanically formal only after you perceive a system EVENT in one of these exact forms: `the Nun REQUESTER asks HOLDER to return the Nun card and end the protection.` or `REQUESTER asks HOLDER whether they can return POSSESSIVE ROLE card after a Baron theft.` Ordinary spoken requests do not qualify. Only the dedicated response accompanying that formal retrieval may narrate the handoff.
+- If the selected action really is a reveal, Nun-card reveal, ability, retrieval, or movement, the line may accompany that selected action but must not introduce or claim resolution of another one. Spoken words never create a second mechanical action.
 
 Natural action-line discipline:
 - This is an accompanying line, not a speech.
