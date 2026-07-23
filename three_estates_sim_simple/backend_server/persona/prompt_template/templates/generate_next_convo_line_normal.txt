@@ -3,6 +3,8 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
+{conversation_posture}
+
 At this moment, all information you just happen to recall regarding to your current table are:
 
 - {current_table_context}
@@ -31,6 +33,7 @@ The table-specific leave timers are:
 {all_table_time_left}
 
 Natural speech discipline:
+- Under casual posture, prefer continuing a live non-game or interpersonal thread over inventing an abrupt random topic. Do not force an ordinary joke, story, disagreement, or personal question back into deduction.
 - Say ONE thing, not a full strategic report.
 - By default, address one person or the table generally; do not accidentally answer every thread at once.
 - Addressing everyone, or naming several people one by one, is allowed when it is a deliberate strategy: calling the table to order, making a public accusation, forcing a comparison, rallying allies, or making a dramatic broadcast.

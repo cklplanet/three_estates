@@ -23,6 +23,22 @@ def unpack_dialogue(utterance):
   return s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat
 
 
+def generate_poig_score(persona, event_type, description):
+  if event_type != "chat":
+    return 1
+  use_llm_poignancy = (
+    casual_conversation_active(persona)
+    or USE_LLM_STRATEGIC_CHAT_POIGNANCY_SCORING
+  )
+  if not use_llm_poignancy:
+    return 1
+  chat_poignancy = prompt_payload(
+    run_gpt_prompt_chat_poignancy(persona, description),
+    1,
+  )
+  return bounded_int(chat_poignancy, 1, minimum=1, maximum=10)
+
+
 def perceive(persona, room): 
   """
   Perceives events around the persona and saves it to the memory, both events 
@@ -74,8 +90,9 @@ def perceive(persona, room):
       o_chat = f"all of {persona.scratch.curr_loc}"
     audience_text = ", ".join(sorted(audience)) if audience else "unknown"
     line = f"{s_chat}, to {o_chat}: ({volume}) {line} [People physically present for this line: {audience_text}]"
+    chat_poignancy = generate_poig_score(persona, "chat", line)
     self_table_ret_events += [persona.a_mem.add_chat(timestamp_chat, s_chat, o_chat, persona.scratch.curr_loc,
-                        line, keywords_chat, 1, 
+                        line, keywords_chat, chat_poignancy,
                         (line, None))]
   # format: (subject, object, volume, contents, timestamp, keywords)
 
@@ -91,8 +108,9 @@ def perceive(persona, room):
       if volume == "practically screaming":
         audience_text = ", ".join(sorted(audience)) if audience else "unknown"
         line = f"{s_chat}: ({volume}, overheard from the {other_table}; people physically present there: {audience_text}) {line}"
+        chat_poignancy = generate_poig_score(persona, "chat", line)
         other_table_ret_events  += [persona.a_mem.add_chat(timestamp_chat, s_chat, o_chat, persona.scratch.curr_loc,
-                            line, keywords_chat, 1, 
+                            line, keywords_chat, chat_poignancy,
                             (line, None))]
   
   timestamp_events = (self_table_ret_events + other_table_ret_events)

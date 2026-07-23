@@ -3,6 +3,8 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
+{conversation_posture}
+
 All information you can recall regarding to your current table:
 
 - {current_table_context}
@@ -24,9 +26,9 @@ Given that {stay_at_table_reason}, please assess the current situation and decid
 For this prompt in particular, you want to for now decide how urgently you want to respond ONLY verbally to the conversation in particular without factoring the need for other actions. For the chance to speak you will place a bid. Highest bidder speaks or acts first.
 - BID OPTIONS:
   0: I would like to lay low, observe and listen for now; or I have better things to do than merely speaking; or the last spoken line was literally from me and I would rather others respond instead.
-  1: I have some general thoughts to share with the group, maybe even just chat and chill for the sake of it.
-  2: I have something critical and specific to contribute to this discussion, including fishing for information.
-  3: It is absolutely urgent for me to speak next due to need for information (asking for soft or hard reveals, etc.), deflection, or dealing with my own or others' win conditions.
+  1: I have a minor aside or general thought to share.
+  2: I have a worthwhile conversational continuation, joke, disagreement, personal question, interpersonal response, or specific game point.
+  3: I strongly want to tease, argue, gossip, complain, tell a story, redirect the topic, seek information, deflect, or deal with my own or others' win conditions.
   4: Someone has addressed me directly and I must respond, either by speaking truthfully, lying, or attempting to rhetorically overpower. That or I just REALLY want to throw in a snarky comment.
 - There are {table_time_left} until you can no longer leave your current table, and {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
@@ -35,5 +37,5 @@ The table-specific leave timers are:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to speak right now? Explain in-character (first-person) your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // How crucial is it for you to speak right now? Explain in-character (first-person) your reasoning in one or two sentences. 
 - "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "1" | "2" | "3" | "4"

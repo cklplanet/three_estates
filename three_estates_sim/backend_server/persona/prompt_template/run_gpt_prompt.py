@@ -46,6 +46,20 @@ def text_cleanup(output):
   return output.strip()
 
 
+def game_summary_epilogue_cleanup(output):
+  summary_start = "<game_summary>"
+  summary_end = "</game_summary>"
+  epilogue_start = "<vn_epilogue>"
+  epilogue_end = "</vn_epilogue>"
+  if not all(marker in output for marker in (summary_start, summary_end, epilogue_start, epilogue_end)):
+    raise ValueError("Combined game-summary/epilogue response is missing a required section marker")
+  summary = output.split(summary_start, 1)[1].split(summary_end, 1)[0].strip()
+  epilogue = output.split(epilogue_start, 1)[1].split(epilogue_end, 1)[0].strip()
+  if not summary or not epilogue:
+    raise ValueError("Combined game-summary/epilogue response contains an empty section")
+  return {"game_summary": summary, "vn_epilogue": epilogue}
+
+
 def movement_duration_hint(persona=None):
   endgame_mode = bool(persona and getattr(persona.room, "endgame_mode", False))
   if endgame_mode:
@@ -110,7 +124,14 @@ def format_table_lockdown_status(table, persona_name=None, indent=""):
         )
 
   if not visible_locks and not king_locks_maintained_by_persona:
-    return f"{indent}Player-imposed lockdowns involving you or maintained by you: none visible.\n"
+    if persona_name and persona_name in getattr(table, "personas", {}):
+      return (
+        f"{indent}AUTHORITATIVE CURRENT PLAYER-IMPOSED LOCKDOWN STATUS FOR YOU: NONE. "
+        "No active King, Queen, or Innkeeper lock currently prevents you from leaving this table. "
+        "Any memory or prior reasoning saying you are trapped by an older player-imposed lock is outdated and must not be treated as current. "
+        "You are free to leave subject only to the table timer and normal movement rules.\n"
+      )
+    return f"{indent}Player-imposed lockdowns involving you or maintained by you at this table: none.\n"
   if visible_locks and not king_locks_maintained_by_persona:
     lines = [f"{indent}Player-imposed lockdowns involving you or maintained by you:\n"]
   for benefactor, target, role in sorted(visible_locks, key=lambda item: (str(item[2]), str(item[0]), str(item[1]))):
@@ -268,6 +289,11 @@ def build_stay_at_table_reason(persona, table, extra_reasons=None):
   if lockdown_matches:
     captors = ", ".join(f"{benefactor}'s {role}" for benefactor, _target, role in lockdown_matches)
     reasons.append(f"you are currently forced to stay by {captors}")
+  else:
+    reasons.append(
+      "authoritative current correction: no active player-imposed lockdown affects you at this table; "
+      "if the stored intent above says an older King, Queen, or Innkeeper lock still traps you, that part is outdated"
+    )
 
   for reason in extra_reasons or []:
     if reason:
@@ -361,6 +387,25 @@ def run_gpt_prompt_generate_vn_epilogue(epilogue_context, line_count_instruction
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=EPILOGUE_GENERATION_LLM_MODEL)
   if output != False:
     return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_game_summary_and_vn_epilogue(epilogue_context, line_count_instruction="Write 50 to 60 total lines.", test_input=None, verbose=False):
+  data = {
+    "PREFIX": PREFIX,
+    "epilogue_context": epilogue_context,
+    "line_count_instruction": line_count_instruction,
+  }
+  prompt_template = "persona/prompt_template/templates/generate_game_summary_and_vn_epilogue.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=game_summary_epilogue_cleanup,
+    model=EPILOGUE_GENERATION_LLM_MODEL,
+  )
+  if output != False:
+    return output, [output, prompt, data]
   
 
 def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=None, verbose=False): 
@@ -378,6 +423,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
     "table_time_left": data['table_time_left'],
     "all_table_time_left": data['all_table_time_left'],
     "total_time_left": data['total_time_left'],
+    "conversation_posture": data['conversation_posture'],
   }
 
   speech_reason = persona.scratch.act_reasoning
@@ -392,6 +438,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
     final_prompt,
     func_clean_up=json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
+    reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
   print(output)
   
@@ -426,6 +473,7 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
     final_prompt,
     func_clean_up=json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
+    reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
   #print(output)
   
@@ -440,11 +488,20 @@ def run_gpt_prompt_chat_poignancy(persona, chat, test_input=None, verbose=False)
           "personal_game_context":personal_game_context,
           "current_line":chat}
 
-  prompt_template = "persona/prompt_template/templates/poignancy_chat.txt"
+  prompt_template = (
+    "persona/prompt_template/templates/poignancy_chat_casual.txt"
+    if casual_conversation_active(persona)
+    else "persona/prompt_template/templates/poignancy_chat.txt"
+  )
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=int)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=int,
+    model=POIGNANCY_SCORING_LLM_MODEL,
+    reasoning_effort="none",
+  )
   #print("chat poignancy output: --->>>", output)
   if output != False: 
     return output, [output, prompt, data]
@@ -460,7 +517,12 @@ def run_gpt_prompt_event_poignancy(persona, event_description, test_input=None, 
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=int)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=int,
+    model=POIGNANCY_SCORING_LLM_MODEL,
+    reasoning_effort="none",
+  )
   #print("event poignancy output: --->>>", output)
   
   if output != False: 
@@ -477,7 +539,12 @@ def run_gpt_prompt_thought_poignancy(persona, thought_description, test_input=No
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=POIGNANCY_SCORING_LLM_MODEL,
+    reasoning_effort="none",
+  )
   
   if output != False: 
     return output, [output, prompt, data]
@@ -553,9 +620,14 @@ def run_gpt_prompt_act_bidding_unified(persona, table, action_options, action_co
       "the real Innkeeper reveal/declaration, if you choose to make it, happens only after you arrive at the Village."
     )
   elif persona.scratch.role == "King":
+    seated_names = ", ".join(sorted(table.personas)) or "none"
+    transit_names = ", ".join(sorted(getattr(persona.room, "transit", {}))) or "none"
     data["ability_bid_action_clarification"] = (
       "For King specifically, your ability is a snapshot of players physically seated at your current table right now. "
-      "It can only lock already-present members of the chosen family. It does NOT trap people currently in transit, people you expect to arrive later, or people at other tables."
+      "It can only lock already-present members of the chosen family. It does NOT trap people currently in transit, people you expect to arrive later, or people at other tables. "
+      f"AUTHORITATIVE CURRENT SEATED SNAPSHOT ELIGIBLE FOR THIS ACTIVATION: {seated_names}. "
+      f"EXPLICITLY INELIGIBLE BECAUSE THEY ARE IN TRANSIT, EVEN IF THEY ARRIVE IMMEDIATELY AFTER THIS ACTION: {transit_names}. "
+      "Score the ability only for what locking the already-seated snapshot accomplishes by itself. A plan whose benefit depends on catching an in-transit or later-arriving player with this activation is mechanically invalid."
     )
   elif persona.scratch.role in {"Queen", "Spinster"}:
     data["ability_bid_action_clarification"] = f"Timing note for this movement-based ability: {movement_duration_hint(persona)}"
@@ -695,7 +767,7 @@ def get_bidding_common_data(persona, table, action_context=""):
   total_time_left = timedelta_to_natural(game_end_time() - persona.scratch.curr_time)
       
   stay_at_table_reason = build_stay_at_table_reason(persona, table)
-  last_act_reasoning = f"your strongest bidding reasoning moments ago was: {persona.scratch.act_reasoning}  (though you CAN change your mind now and anytime)" if persona.scratch.act_reasoning else "you haven't really thought about doing anything yet"
+  last_act_reasoning = f"your strongest bidding reasoning moments ago was: {persona.scratch.act_reasoning} (Do rephrase or reevaluate whether this still applies or something fresher is better, for example if you actually answered an earlier question by others, or if you've asked something multiple times in a row then whether you should shut up and wait for an answer)" if persona.scratch.act_reasoning else "you haven't really thought about doing anything yet"
   ability_bid_action_clarification = (
     "For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, "
     "how urgently you want to use your ability (and in the process reveal your role at everyone at your current table) to the conversation in particular. "
@@ -718,6 +790,7 @@ def get_bidding_common_data(persona, table, action_context=""):
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
+    "conversation_posture": conversation_posture_prompt(persona),
   }
 
   return data
@@ -878,6 +951,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
+    "conversation_posture": conversation_posture_prompt(persona),
     "options": options
   }
 
@@ -900,9 +974,15 @@ def run_gpt_prompt_select_ability_target(persona, table, ability_reasoning="", t
     family_options = set()
     for player_name, player in table.personas.items():
       family_options.add(ROLE_DICT[player.scratch.role]["family"])
+    seated_names = ", ".join(sorted(table.personas)) or "none"
+    transit_names = ", ".join(sorted(getattr(persona.room, "transit", {}))) or "none"
     ability_target_info += (
       "as King, you can select one of the families physically present at the table right now as target. "
-      "This only affects already-seated players of that family; it does not wait for players in transit or later arrivals:\n"
+      "This activation takes one immutable snapshot and only affects already-seated players of that family; it does not wait for players in transit or later arrivals. "
+      f"AUTHORITATIVE ELIGIBLE SEATED SNAPSHOT: {seated_names}. "
+      f"EXPLICITLY EXCLUDED FROM THIS ACTIVATION BECAUSE THEY ARE IN TRANSIT: {transit_names}. "
+      "Even if an excluded player lands here immediately after this action, they remain free and are not retroactively added to the lock. "
+      "Do not claim that choosing a family now will bind, trap, test, or otherwise affect any excluded transit player. Available family choices:\n"
     )
     family_options = ", ".join(list(family_options))
     ability_target_info += family_options
@@ -915,7 +995,8 @@ def run_gpt_prompt_select_ability_target(persona, table, ability_reasoning="", t
     ability_reasoning_msg = (
       "When deciding to use this ability, your reasoning was:\n"
       f"{ability_reasoning}\n"
-      "Use this as optional context for target selection.\n"
+      "Use this as optional context for target selection, but correct any part that conflicts with the authoritative current target rules above. "
+      "In particular, for King, discard any claim that this activation will catch someone currently in transit or arriving later.\n"
     )
   if persona.scratch.role == "Spinster":
     ability_reasoning_msg += (
@@ -1016,6 +1097,7 @@ def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, 
     final_prompt,
     func_clean_up=json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
+    reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
   if output != False:
     return output, [output, prompt, data_sub]

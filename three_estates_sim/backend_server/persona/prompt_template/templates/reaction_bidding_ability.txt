@@ -34,5 +34,5 @@ Given that {stay_at_table_reason}, and optionally considering {last_act_reasonin
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to use your ability right now? Explain in-character (first-person) your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // How crucial is it for you to use your ability right now? Explain in-character (first-person) your reasoning in one or two sentences. 
 - "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "2" | "4" | "5" | "7" (numbers EXACTLY as shown, NOT continuous)

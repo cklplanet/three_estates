@@ -31,24 +31,31 @@ def table_leave_timer_status(table_name, curr_time):
     if delta < datetime.timedelta(0):
         if table_name == "Wilderness":
             return (
-                "Wilderness is closed because the last regular table has closed; players at Wilderness can no longer "
-                "leave by normal movement, but players may still enter that table."
+                "Wilderness is FINAL-LOCKED because the last regular table has closed. Nobody seated at Wilderness can leave "
+                "by normal movement or by any voluntary or forced ability; timer closure overrides Queen drags, Bishop exiles, "
+                "Spinster departures, and every other departure effect. Players may still enter Wilderness."
             )
         return (
-            f"{table_name} timer has expired; players at {table_name} can no longer leave by normal movement, "
-            "but players may still enter that table."
+            f"{table_name} timer has expired and its timer lockdown is FINAL. Nobody seated at {table_name} can leave "
+            "by normal movement or by any voluntary or forced ability; timer closure overrides Queen drags, Bishop exiles, "
+            "Spinster departures, and every other departure effect. Players may still enter that table."
         )
     if delta == datetime.timedelta(0):
         if table_name == "Wilderness":
             return (
                 "Wilderness has less than 1 second left before the last regular table closes; Wilderness will close "
-                "with that final regular table, but players there may still leave only before the next timer check resolves the lockdown."
+                "with that final regular table. Players may still leave only before the next timer check resolves the lockdown; "
+                "after that check, the lockdown is final and no voluntary or forced ability can move anyone out."
             )
         return (
             f"{table_name} has less than 1 second left and is about to close down NOW; "
-            "players there may still leave only before the next timer check resolves the lockdown."
+            "players there may still leave only before the next timer check resolves the lockdown. After that check, "
+            "the lockdown is final and no voluntary or forced ability can move anyone out."
         )
-    return f"{timedelta_to_natural(delta)} remaining before players at {table_name} can no longer leave by normal movement.{wilderness_note}"
+    return (
+        f"{timedelta_to_natural(delta)} remaining before {table_name} enters FINAL timer lockdown, after which nobody seated there "
+        f"can leave by normal movement or any voluntary or forced ability; players may still enter.{wilderness_note}"
+    )
 
 
 def get_other_player_context(table, persona):
@@ -78,6 +85,12 @@ def ability_trigger(persona, table):
 
     if not has_own_role_card(persona, role):
         return f"Your {role} ability is not currently available because you do not have your {role} card.\n"
+
+    if table.timer_expired and role in {"Queen", "Spinster", "Bishop", "Innkeeper"}:
+        return (
+            f"Your {role} ability cannot cause anyone to leave this table because its timer lockdown has expired and is FINAL. "
+            "No voluntary or forced role ability can move a seated player out after timer closure, although players may still enter.\n"
+        )
 
     if has_own_role_card(persona): # Prerequisite: your card is still with you
         if len(table.personas.keys()) == 2: # those that require one-on-one triggers
@@ -127,12 +140,12 @@ def ability_trigger(persona, table):
             if persona.scratch.curr_loc != "Forest":
                 trigger_message = "The condition for your Spinster ability is not currently met: it only works when you leave the Forest.\n"
             elif table.timer_expired:
-                trigger_message = "The condition for your Spinster ability is not currently met: the Forest timer has expired, so you cannot leave normally to trigger it.\n"
+                trigger_message = "The condition for your Spinster ability is not currently met: the Forest timer lockdown is final, so no ability can move you out to trigger it.\n"
             elif table_size <= 1:
                 trigger_message = "The condition for your Spinster ability is not currently met: there is no other player in the Forest to mark.\n"
         elif role == "Queen":
             if table.timer_expired:
-                trigger_message = "The condition for your Queen ability is not currently met: your table timer has expired, so you cannot leave normally to trigger it.\n"
+                trigger_message = "The condition for your Queen ability is not currently met: your table timer lockdown is final, so no ability can move you or a target out.\n"
             elif table_size <= 1:
                 trigger_message = "The condition for your Queen ability is not currently met: there is no other player here to make follow you.\n"
         elif role == "Bishop":

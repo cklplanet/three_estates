@@ -18,6 +18,6 @@ If you wish to use your ability, please indicate:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
--  "reasoning": "string"  // Explain in-character your reasoning on which target(s) to use your ability on in one or two sentences. Avoid using violent or harmful language.
+-  "reasoning": "string"  // Explain in-character your reasoning on which target(s) to use your ability on in one or two sentences. 
 -  "target": "string"                // Target, ONLY from the options provided to you, exactly as is
 

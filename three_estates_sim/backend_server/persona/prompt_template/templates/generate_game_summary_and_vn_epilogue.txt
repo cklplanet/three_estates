@@ -1,0 +1,28 @@
+{PREFIX}
+
+The game has ended. Produce two post-game sections from the single shared context below.
+
+CONTEXT:
+{epilogue_context}
+
+First, write a short paragraph of exactly three or four sentences summarizing this particular game. The absolute focus of this is mostly and primarily on character interactions that emerged or changed during play compared with their pre-game relationships, expectations, or personalities—not on explaining their hidden roles. Mention in broad strokes who won and who lost, without mechanically listing every result when a natural grouping will do. Where the context supports it, you may briefly suggest what the outcome or an interaction means for SPECIFIC ones among the characters afterward, but only those that actually affects relationships even outside the context of the game itself. Do not invent an interaction that is not supported by the context.
+
+Second, write a post-game visual novel style scene, as if all characters are still physically around the game tables after the results have been revealed.
+
+{line_count_instruction}
+
+Format each scene line (with an empty line break in-between each two) as either (CANNOT be both at once):
+- Character full name: character dialogue
+- *Third-person rumination, movement, internal narration, or room atmosphere. Full sentences.*
+
+Tone: relatively literary but casual (BUT can differ wildly in length etc depending on the actual characters present, if the character is fictional then make them as in-character as possible), like a late-night post-game room where people are decompressing, teasing each other, processing betrayals, joking, or drifting into unrelated conversation. It can discuss the game, the results, role reveals, whatever new character dynamics that emerged, mistaken reads, grudges, alliances, or literally anything else that feels natural after the game.
+Also, if several of the characters share a setting (whether real life or a fictional source), you may consider bringing in other characters outside the roster who are related to that shared setting.
+
+Keep each scene line readable and not too long. Do not use JSON. Do not number the lines or add headings inside either section. Do not explain the format. Return exactly these wrapper markers, with the summary paragraph and scene inside them:
+
+<game_summary>
+[two-to-three-sentence paragraph]
+</game_summary>
+<vn_epilogue>
+[visual novel scene]
+</vn_epilogue>

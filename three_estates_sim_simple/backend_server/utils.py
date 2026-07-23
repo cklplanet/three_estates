@@ -29,11 +29,59 @@ def read_int_config(key, default):
         return default
 
 
+def read_bool_config(key, default):
+    raw_value = os.getenv(key) or read_local_env_value(key)
+    if raw_value is None:
+        return default
+    return str(raw_value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER_KEY") or "YOUR_API_KEY_HERE"
 CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
 EPILOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_EPILOGUE_MODEL") or read_local_env_value("THREE_ESTATES_EPILOGUE_MODEL") or "openai/gpt-5.5"
+POIGNANCY_SCORING_LLM_MODEL = os.getenv("THREE_ESTATES_POIGNANCY_MODEL") or read_local_env_value("THREE_ESTATES_POIGNANCY_MODEL") or "openai/gpt-5.5"
 FALLBACK_LLM_MODEL = os.getenv("THREE_ESTATES_FALLBACK_MODEL") or read_local_env_value("THREE_ESTATES_FALLBACK_MODEL") or "openai/gpt-5.5"
+ALLOW_SPEECH_REASONING = read_bool_config("THREE_ESTATES_ALLOW_SPEECH_REASONING", True)
+USE_LLM_STRATEGIC_CHAT_POIGNANCY_SCORING = read_bool_config(
+    "THREE_ESTATES_USE_LLM_CHAT_POIGNANCY_SCORING",
+    False,
+)
+CASUAL_SECONDS_PER_PHASE = max(
+    1,
+    read_int_config("THREE_ESTATES_CASUAL_SECONDS_PER_PHASE", 10),
+)
+
+
+def casual_conversation_transition_time():
+    if not TIMERS:
+        return datetime.timedelta(0)
+    return min(TIMERS.values()) * 3 / 4
+
+
+def casual_conversation_active(persona_or_room):
+    room = getattr(persona_or_room, "room", persona_or_room)
+    if getattr(room, "conversation_mode", "strategic") != "casual":
+        return False
+    scratch = getattr(persona_or_room, "scratch", None)
+    curr_time = getattr(scratch, "curr_time", None)
+    if curr_time is not None:
+        return curr_time < casual_conversation_transition_time()
+    return not any(table.timer_expired for table in getattr(room, "locations", {}).values())
+
+
+def conversation_posture_prompt(persona):
+    room = getattr(persona, "room", None)
+    mode = getattr(room, "conversation_mode", "strategic")
+    if casual_conversation_active(persona):
+        return (
+            "CONVERSATIONAL POSTURE — CASUAL, EARLY GAME:\n"
+            "Treat the game as the reason everyone is gathered, not as the only worthwhile subject. Continuing an interesting topic, joking, teasing, arguing, gossiping, complaining, telling a story, asking something personal, or reacting to someone's personality are valid goals and can be as urgent as tactical speech. "
+            "Do not bolt a role accusation or game question onto an otherwise casual line. Remain fully in character, and still prioritize direct questions, formal game events, forced reactions, immediate threats, or genuinely urgent mechanics."
+        )
+    if mode == "casual":
+        return "CONVERSATIONAL POSTURE — STRATEGIC, LATE IN THE FIRST TABLE TIMER:\nThree quarters of the earliest-expiring table timer has elapsed, so the game may now take priority over the earlier casual posture."
+    return "CONVERSATIONAL POSTURE — STRATEGIC:\nTreat the game and your win condition as central objectives while still speaking naturally."
 # Put your name
 key_owner = "<Name>"
 

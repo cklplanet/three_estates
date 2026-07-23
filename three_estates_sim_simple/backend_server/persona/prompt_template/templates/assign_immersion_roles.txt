@@ -1,0 +1,18 @@
+You are reassigning hidden game roles to an existing cast for a social deduction simulation.
+
+Character context:
+{character_group_context}
+
+Available role pool, with exact multiplicities:
+{role_pool_text}
+
+Role rules:
+{role_rulebook}
+
+Character profiles:
+{character_profiles}
+
+Assign every character exactly one available role. Do not assign anyone their listed current_role again.
+Choose by temperament, dramatic fit, likely conversational behavior, and strategic personality fit rather than literal title, occupation, class, or source-material role.
+
+Return ONLY one JSON dictionary mapping exact character names to exact role names. Do not include explanations.

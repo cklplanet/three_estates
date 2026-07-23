@@ -16,14 +16,16 @@ The conversations you have participated in so far for the last several minutes h
 
 As Innkeeper, when you enter the Village you may reveal your Innkeeper card and declare yourself. If you reveal and declare, nobody can leave the Village until someone else enters or you leave.
 
-Current seating, lockdowns, and board context immediately before declaring:
+TIMING CLARIFICATION: This yes/no prompt asks whether you want to PRECOMMIT to that declaration on this arrival. Choosing "yes" does not reveal your card or create the lock at this exact instant. The system first seats every other player already arriving during the CURRENT arrival phase; only after all of those current-phase arrivals have seated do you reveal your Innkeeper card, declare, and lock the resulting Village occupants. Those same-phase arrivals happen before your lock and therefore do not immediately break it. After your declaration resolves, however, ANY later arrival in a subsequent arrival phase breaks the lock, even if that later arrival happens almost immediately. You leaving also breaks it.
+
+Current observed seating, lockdowns, and board context while making this precommitment (additional current-phase arrivals may still seat before the declaration resolves):
 {current_table_context}
 
-Decide whether revealing your Innkeeper card to lock the Village right now helps your position, protects your desired table arrangement, or creates too much risk by revealing your role.
+Decide specifically whether revealing and declaring AFTER all arrivals in the current arrival phase have seated helps your position, protects that resulting table arrangement, or creates too much risk given that any later arrival will break the lock.
 - Current table leave timer status: {table_time_left}
 - There are {total_time_left} until the game ends entirely.
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character whether you should reveal and declare as Innkeeper right now in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // Explain in-character whether you should precommit to revealing and declaring after all current-phase arrivals have seated, in one or two sentences. 
 - "result": "string" // Response is exactly one of: "yes" | "no", all lowercase

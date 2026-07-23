@@ -14,6 +14,8 @@ Generated character profiles:
 
 Assign every character exactly one role from the available role pool, using each listed role slot exactly once.
 
+If a profile includes current_role, this is a reroll of an existing cast: do not assign that character the same role again.
+
 Choose roles by temperament, dramatic fit, likely conversational behavior, and strategic personality fit. Examples of the kind of fit to consider:
 - A commanding, status-conscious, socially central character may fit Queen, King, Baron, or Innkeeper.
 - A suspicious outsider, opportunist, trickster, or social climber may fit Thief, Baron, Bishop, or Spinster.

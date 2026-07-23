@@ -43,6 +43,57 @@ class Persona:
     scratch_saved = f"{folder_mem_saved}/scratch.json"
     self.scratch = Scratch(role, f_saved=scratch_saved)
 
+  def queen_drag_blocked_by_immunity(self, table, target_name, destination=None):
+    if target_name not in table.personas:
+      return False
+    target = table.personas[target_name]
+    destination_text = f" to {destination}" if destination else ""
+    if target.scratch.role == "Farmer":
+      act_desp = (
+        f"{target_name} reveals {target.role_card_text(role='Farmer')} and is immune to "
+        f"{self.scratch.name}'s Queen drag; {target_name} remains at {table.name}."
+      )
+      table.add_table_event(
+        (
+          target_name,
+          self.scratch.name,
+          act_desp,
+          self.scratch.curr_time,
+          set(table.personas.keys()) | {"Farmer", "Queen"},
+        )
+      )
+      target.speak(
+        table,
+        (
+          f"the Queen {self.scratch.name} has just tried to drag you{destination_text}, "
+          "but you are the Farmer and immune to the Queen ability; reveal your Farmer card now, "
+          "make clear that the drag fails before movement, and remain at this table"
+        ),
+      )
+      if debug:
+        debug_log(
+          f"[QUEEN-DRAG-BLOCKED] t={self.scratch.curr_time} | table={table.name} | "
+          f"queen={self.scratch.name} | target={target_name} | destination={destination} | "
+          "reason=farmer_immunity"
+        )
+      return True
+    if not target.scratch.nun_protected:
+      return False
+    target.speak(
+      table,
+      (
+        f"the Queen {self.scratch.name} is trying to drag you{destination_text}, "
+        "but the Nun card protects you; show it and make clear that you remain at this table"
+      ),
+    )
+    if debug:
+      debug_log(
+        f"[QUEEN-DRAG-BLOCKED] t={self.scratch.curr_time} | table={table.name} | "
+        f"queen={self.scratch.name} | target={target_name} | destination={destination} | "
+        "reason=nun_protection"
+      )
+    return True
+
 
   def save(self, save_folder): 
     """
@@ -109,7 +160,16 @@ class Persona:
     return f"{self.possessive_for(persona)} {role} card"
 
 
-  def resolve_baron_reaction(self, table, revealed_player_name, action_context, block_ability=True):
+  def resolve_baron_reaction(
+    self,
+    table,
+    revealed_player_name,
+    action_context,
+    block_ability=True,
+    bishop_correct_guess=False,
+    bishop_target_name=None,
+    bishop_guessed_family=None,
+  ):
     if len(table.personas) < 3 or revealed_player_name not in table.personas:
       return False
     revealed_player = table.personas[revealed_player_name]
@@ -146,6 +206,13 @@ class Persona:
         special_circumstance += f", blocking {revealed_player_name}'s {revealed_player.scratch.role} ability before it resolves"
       else:
         special_circumstance += " after their reveal has already been made"
+      if block_ability and revealed_player.scratch.role == "Bishop" and bishop_correct_guess:
+        special_circumstance += (
+          f". Special case: the Bishop's guess that {bishop_target_name} belongs to the "
+          f"{bishop_guessed_family} family is actually correct, but your Baron block makes that correct guess "
+          f"irrelevant and prevents {bishop_target_name}'s exile. You may acknowledge or gloat about thwarting "
+          "a correct guess, but must not claim the guess itself was wrong"
+        )
       baron.speak(table, special_circumstance)
       if block_ability:
         act_desp = f"{baron_name} reveals {self.role_card_text(baron, 'Baron')}, blocks {revealed_player_name}'s {revealed_player.scratch.role} ability, and steals the {revealed_player.scratch.role} card."
@@ -320,6 +387,9 @@ class Persona:
       )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
       if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
+        normal_record["farewell"] = False
+        return [normal_record]
+      if self.queen_drag_blocked_by_immunity(table, target_name, destination):
         normal_record["farewell"] = False
         return [normal_record]
 
@@ -527,10 +597,39 @@ class Persona:
       else:
         target_name = self.select_ability_target(table, (self.scratch.current_bidding_reasonings or {}).get("ability", ""))
 
-      ability_attempt_context = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} and attempts to use {poss} {action_role} ability on {target_name}."
-      self.speak(table, with_optional_speaking_reasoning(f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; say what you want the table to hear before the ability resolves"))
+      bishop_guess = None
+      if action_role == "Bishop":
+        bishop_target = table.personas[target_name]
+        bishop_guess = self.guess_family_bishop(bishop_target, table)["guess"]
+        family_options = {role_data["family"] for role_data in ROLE_DICT.values()}
+        if bishop_guess not in family_options:
+          bishop_guess = ROLE_DICT[bishop_target.scratch.role]["family"]
+        ability_attempt_context = (
+          f"{self.scratch.name} reveals {self.role_card_text(role='Bishop')} and attempts to use "
+          f"{poss} Bishop ability on {target_name} by guessing {bishop_guess}."
+        )
+        ability_speech_context = (
+          f"you are revealing your Bishop card and attempting to use your ability on {target_name}; "
+          f"you have already chosen to guess that {target_name}'s family is {bishop_guess}. "
+          "Announce that guess without implying a different family"
+        )
+      else:
+        ability_attempt_context = f"{self.scratch.name} reveals {self.role_card_text(role=action_role)} and attempts to use {poss} {action_role} ability on {target_name}."
+        ability_speech_context = f"you are revealing your {action_role} card and attempting to use your ability on {target_name}; say what you want the table to hear before the ability resolves"
+      self.speak(table, with_optional_speaking_reasoning(ability_speech_context))
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
-      if action_role != "Spinster" and self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
+      if action_role != "Spinster" and self.resolve_baron_reaction(
+        table,
+        self.scratch.name,
+        ability_attempt_context,
+        block_ability=True,
+        bishop_correct_guess=(
+          action_role == "Bishop"
+          and bishop_guess == ROLE_DICT[table.personas[target_name].scratch.role]["family"]
+        ),
+        bishop_target_name=target_name if action_role == "Bishop" else None,
+        bishop_guessed_family=bishop_guess,
+      ):
         return
 
       if action_role == "King":
@@ -623,7 +722,7 @@ class Persona:
           table.add_table_event((self.scratch.name, target_name, act_desp, self.scratch.curr_time, set([self.scratch.name, target_name])))
 
       elif action_role == "Bishop":
-        guess = self.guess_family_bishop(target, table)["guess"]
+        guess = bishop_guess
         special_circumstance = f"you, as Bishop, have just made an internal guess that {target_name}'s family is {guess}, which you now want to annnounce to the target and to the table"
         if guess != ROLE_DICT[target.scratch.role]["family"]:
           special_circumstance = f"you have just been guessed by the Bishop {self.scratch.name} as family {guess}, which is wrong"
@@ -697,6 +796,10 @@ class Persona:
     for relationship_name, relationship in self.scratch.relationships.items():
       personal_context_msg += f"Your relationship with {relationship_name}: {relationship}\n"
     personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\nYour own {your_role} card is currently {own_card_status}. You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.\n"
+    personal_context_msg += (
+      f"TIME ELAPSED SINCE THE GAME STARTED: "
+      f"{timedelta_to_natural(self.scratch.curr_time)}.\n"
+    )
     return personal_context_msg
 
   

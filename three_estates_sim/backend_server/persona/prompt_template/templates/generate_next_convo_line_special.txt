@@ -35,6 +35,8 @@ Given that {special_circumstance}, please decide exactly what you want to say IM
 - If the selected action really is a reveal, Nun-card reveal, ability, retrieval, or movement, the line may accompany that selected action but must not introduce or claim resolution of another one. Spoken words never create a second mechanical action.
 
 Natural action-line discipline:
+- Be as character-accurate in tone as possible.
+- When it comes naturally, vary the opening or sentence shape from your own most recent spoken line; preserve your character’s voice and do not force awkward novelty merely to be different.
 - This is an accompanying line, not a speech.
 - Normally keep it punchy: one sentence is ideal, two short sentences maximum.
 - Do not address more than one named person unless the action directly involves multiple people; or you're directly making a last-minute verbal (non-ability, non-hard-reveal, etc.) strategy to the table.
@@ -42,11 +44,15 @@ Natural action-line discipline:
 - Say what someone would plausibly say while moving, revealing, reacting, or being pressured (or in case of arriving at a table, any announcements you may or may not want to make).
 - Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
 - Emotion, implication, and subtext are better than explanation.
+- But you're also allowed to be creative and colorful (in a character-accurate way) in prose or specific about details not directly mentioned in the reasoning or your and others' backgrounds (while keeping the exact wording fresh from line to line; as in do NOT repeat the exact formatting or wording of prior lines, especially your own) when the situation calls for it;
+- - For example (non-exhaustive, mixing ordinary and profanity-enabled phrasing when character-appropriate):
+- - - "I am exhausted" in reasoning might become "My legs feel like somebody replaced the bones with wet sand" in the actual line;
+- - - "That accusation is ridiculous" might become "That is the dumbest fucking theory anyone has dragged into this room";
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
 - "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
-- "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences.
+- "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences. Tone not restricted (e.g. NSFW allowed) (BUT only taking into account the actual dialogue context and everyone else's tone rn)

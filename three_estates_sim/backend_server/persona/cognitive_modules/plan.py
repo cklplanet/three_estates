@@ -74,7 +74,7 @@ def bid(persona, table, action_context=""):
       return False
     return (
       (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or
-      (role == "Bishop" and table.bishop_trigger) or
+      (role == "Bishop" and table.bishop_trigger and not table.timer_expired) or
       (role in {"Priest", "Nun"} and table_size == 2) or
       (role == "Thief" and table_size == 2 and not thief_reverse_swap_locked(table, persona.scratch.name)) or
       (role == "Spinster" and table.name == "Forest" and not table.timer_expired) or
@@ -150,17 +150,29 @@ def bid(persona, table, action_context=""):
       ),
     })
   if not ENABLE_SPEAKING_COOLDOWN or persona.scratch.speaking_cooldown <= 0:
+    if casual_conversation_active(persona):
+      speaking_score_meanings = (
+        "0 = listen, allow someone else to answer, or let a silence stand, especially if you just spoke. "
+        "1 = a minor aside or low-stakes thought. "
+        "2 = a worthwhile continuation of an interesting topic, joke, disagreement, personal question, or interpersonal thread. "
+        "3 = a strong in-character desire to tease, argue, gossip, complain, tell a story, ask something personal, or redirect the room away from the game. "
+        "4 = you were directly addressed, are emotionally invested, or have an especially character-revealing response that you strongly want heard now."
+      )
+    else:
+      speaking_score_meanings = (
+        "0 = lay low, observe, or you have better things to do than merely speaking; this is especially appropriate if the last spoken line was yours, and even more so if you just asked a question and should give others a chance to answer. "
+        "1 = you have general thoughts to share, maybe even just chat or keep the table moving. "
+        "2 = you have something critical and specific to contribute, including fishing for information or non-card-backed reveals. "
+        "3 = urgent need to speak next for information, deflection, or your/others' win conditions. "
+        "4 = merely speaking or responding is absolutely preferable to hard reveal or ability use, especially if addressed and needing to answer truthfully, lie, overpower rhetorically, or throw in a pointed comment."
+      )
     action_options.append({
       "action": "speak",
       "scores": [0, 1, 2, 3, 4],
       "description": (
         "only speak, ask, answer, accuse, soft-claim, bluff, joke, or pressure without hard proof or ability use. Score meanings: "
         "Only voices at 'practically screaming' volume, not merely 'loud', can reach other tables or people in transit; consider that broadcast value when it is strategically necessary or emotionally overwhelming, but use it sparingly. "
-        "0 = lay low, observe, or you have better things to do than merely speaking; this is especially appropriate if the last spoken line was yours, and even more so if you just asked a question and should give others a chance to answer. "
-        "1 = you have general thoughts to share, maybe even just chat or keep the table moving. "
-        "2 = you have something critical and specific to contribute, including fishing for information or non-card-backed reveals. "
-        "3 = urgent need to speak next for information, deflection, or your/others' win conditions. "
-        "4 = merely speaking or responding is absolutely preferable to hard reveal or ability use, especially if addressed and needing to answer truthfully, lie, overpower rhetorically, or throw in a pointed comment."
+        + speaking_score_meanings
       ),
     })
 

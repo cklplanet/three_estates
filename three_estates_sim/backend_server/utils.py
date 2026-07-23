@@ -43,6 +43,7 @@ CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or r
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
 DIALOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_DIALOGUE_MODEL") or read_local_env_value("THREE_ESTATES_DIALOGUE_MODEL") or "openai/gpt-5.5"
 EPILOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_EPILOGUE_MODEL") or read_local_env_value("THREE_ESTATES_EPILOGUE_MODEL") or "openai/gpt-5.5"
+POIGNANCY_SCORING_LLM_MODEL = os.getenv("THREE_ESTATES_POIGNANCY_MODEL") or read_local_env_value("THREE_ESTATES_POIGNANCY_MODEL") or "openai/gpt-5.5"
 FALLBACK_LLM_MODEL = os.getenv("THREE_ESTATES_FALLBACK_MODEL") or read_local_env_value("THREE_ESTATES_FALLBACK_MODEL") or "openai/gpt-5.5"
 # Put your name
 key_owner = "<Name>"
@@ -72,8 +73,16 @@ MOVEMENT_LEAVE_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_LEAVE_CO
 MOVEMENT_STAY_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_MOVEMENT_STAY_COOLDOWN_STEPS", 2)
 STARTING_MOVEMENT_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_STEPS", MOVEMENT_LEAVE_COOLDOWN_STEPS)
 STARTING_MOVEMENT_COOLDOWN_RADIUS = max(0, read_int_config("THREE_ESTATES_STARTING_MOVEMENT_COOLDOWN_RADIUS", 2))
+NON_SPEAKING_ACTION_MOVEMENT_COOLDOWN_DECREMENT = max(
+    0,
+    read_int_config("THREE_ESTATES_NON_SPEAKING_ACTION_COOLDOWN_DECREMENT", 1),
+)
 ENABLE_SPEAKING_COOLDOWN = read_bool_config("THREE_ESTATES_ENABLE_SPEAKING_COOLDOWN", False)
-USE_LLM_CHAT_POIGNANCY_SCORING = read_bool_config("THREE_ESTATES_USE_LLM_CHAT_POIGNANCY_SCORING", False)
+ALLOW_SPEECH_REASONING = read_bool_config("THREE_ESTATES_ALLOW_SPEECH_REASONING", True)
+USE_LLM_STRATEGIC_CHAT_POIGNANCY_SCORING = read_bool_config(
+    "THREE_ESTATES_USE_LLM_CHAT_POIGNANCY_SCORING",
+    False,
+)
 SPEAKING_COOLDOWN_STEPS = read_int_config("THREE_ESTATES_SPEAKING_COOLDOWN_STEPS", 1)
 SCRATCH_IMPORTANCE_TRIGGER_MAX = read_int_config("THREE_ESTATES_IMPORTANCE_TRIGGER_MAX", 150)
 SCRATCH_RETENTION_BATCHES = read_int_config("THREE_ESTATES_RETENTION_BATCHES", 15)
@@ -96,8 +105,13 @@ SIM_SECONDS_PER_STEP = read_int_config(
     "THREE_ESTATES_SECONDS_PER_PHASE",
     read_int_config("THREE_ESTATES_SECONDS_PER_STEP", 10)
 )
+CASUAL_SECONDS_PER_PHASE = max(
+    1,
+    read_int_config("THREE_ESTATES_CASUAL_SECONDS_PER_PHASE", SIM_SECONDS_PER_STEP),
+)
 ENDGAME_SECONDS_PER_PHASE = read_int_config("THREE_ESTATES_ENDGAME_SECONDS_PER_PHASE", 2.5 * SIM_SECONDS_PER_STEP)
 SERVER_SLEEP_SECONDS = read_int_config("THREE_ESTATES_SERVER_SLEEP_SECONDS", 5)
+PHASE_SNAPSHOT_RETENTION = max(1, read_int_config("THREE_ESTATES_PHASE_SNAPSHOT_RETENTION", 2))
 DIALOGUE_LOG_PATH = None
 CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
@@ -280,7 +294,7 @@ def build_prefix(mode=None):
         "- Roles belong to one of three **families**: Nobility, Commoners, Clergy. Each player has exactly one hidden assigned role and one own role card.\n"
         f"- Exact role pool for this game: {role_count_summary(mode)}.\n"
         f"- {table_line}\n"
-        "- All players must be at some table at all times unless in transit. Players may move between connected tables freely but can only leave a table if its timer is still active, unless affected by certain abilities.\n"
+        "- All players must be at some table at all times unless in transit. Players may move between connected tables freely only while the source table's timer is still active. Once a table's timer lockdown resolves, it is FINAL: nobody seated there can leave by normal movement or by any voluntary, forced, or reaction-based role ability. Queen drags, Spinster departures, Bishop exiles, Innkeeper departure bids, and every other effect that would move someone out all fail against an expired table. Players may still enter an expired table.\n"
         "- To activate an ability, a player must reveal their own role card and be holding it. Some abilities require conditions like being alone with another player.\n"
         "- A role card's physical location is NOT the location of its role, family, or player. Except when a Thief ability successfully swaps roles, every player keeps their current role, family, and win condition even when their card is held by someone else. Table composition and location-based win conditions count seated players by their current roles, NEVER loose cards: for example, a Baron holding a King card is still only a Baron, and does not make the King present at that table.\n"
         "- Only one ability may be activated at a table at a time. Players may voluntarily reveal their role to others at their table at any time.\n"
@@ -640,6 +654,54 @@ def role_family_terms():
     return terms
 
 
+def casual_conversation_transition_time():
+    regular_table_timers = [
+        timer
+        for table_name, timer in TIMERS.items()
+        if table_name != "Wilderness"
+    ]
+    if not regular_table_timers:
+        return datetime.timedelta(0)
+    return min(regular_table_timers) * 3 / 4
+
+
+def casual_conversation_active(persona_or_room):
+    room = getattr(persona_or_room, "room", persona_or_room)
+    if getattr(room, "conversation_mode", "strategic") != "casual":
+        return False
+    scratch = getattr(persona_or_room, "scratch", None)
+    curr_time = getattr(scratch, "curr_time", None)
+    if curr_time is not None:
+        return curr_time < casual_conversation_transition_time()
+    return not any(
+        table.timer_expired
+        for table_name, table in getattr(room, "locations", {}).items()
+        if table_name != "Wilderness"
+    )
+
+
+def conversation_posture_prompt(persona):
+    room = getattr(persona, "room", None)
+    mode = getattr(room, "conversation_mode", "strategic")
+    if casual_conversation_active(persona):
+        return (
+            "CONVERSATIONAL POSTURE — CASUAL, EARLY GAME:\n"
+            "Treat the social-deduction game as the reason everyone is gathered, not as the only worthwhile subject or an objective that must dominate every turn. "
+            "Ordinary social impulses are real goals: continue an interesting topic, joke, tease, argue, gossip, complain, tell a story, ask something personal, sit in an awkward silence, or react to someone's personality. "
+            "A good conversational continuation can deserve as much urgency as a tactical remark. Do not append a role accusation or game question to an otherwise casual line merely to make it useful. "
+            "Casual does not mean friendly or frivolous; remain fully in character. Immediate threats, direct questions, formal game events, forced reactions, and genuinely urgent mechanical opportunities still override this posture."
+        )
+    if mode == "casual":
+        return (
+            "CONVERSATIONAL POSTURE — STRATEGIC, LATE IN THE FIRST TABLE TIMER:\n"
+            "Three quarters of the earliest-expiring table timer has elapsed, so the game and its consequences may now take priority, though established interpersonal threads can still color what you say and do."
+        )
+    return (
+        "CONVERSATIONAL POSTURE — STRATEGIC:\n"
+        "Treat the social-deduction game and your character's win condition as central objectives, while still speaking naturally and allowing personality or interpersonal reactions to matter."
+    )
+
+
 def heuristic_poignancy_score(persona, event_type, description, subject=None, obj=None, keywords=None):
     """Deterministic game-aware memory importance score from 1 to 10."""
     if isinstance(persona, str):
@@ -777,6 +839,19 @@ def deterministic_chat_poignancy_score(persona, description, subject=None, obj=N
         if any(contains_term(body_lower, alias) for alias in name_aliases(name)):
             other_names_mentioned = True
             break
+
+    if casual_conversation_active(persona):
+        if own_name_mentioned and has_role_or_family:
+            return 5
+        if own_name_mentioned:
+            return 4
+        if other_names_mentioned and has_role_or_family:
+            return 4
+        if other_names_mentioned:
+            return 3
+        if has_role_or_family:
+            return 3
+        return 2
 
     if own_name_mentioned and has_role_or_family:
         return 9

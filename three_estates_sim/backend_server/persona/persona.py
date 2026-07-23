@@ -71,6 +71,77 @@ class Persona:
         f"[ACTION-COOLDOWN-RESET] t={self.scratch.curr_time} | table={table.name} | "
         f"character={self.scratch.name} | action={action_name} | movement_cooldown=0"
       )
+    changed = []
+    for other_name, other_persona in table.personas.items():
+      if other_persona is self or other_name == self.scratch.name:
+        continue
+      previous = other_persona.scratch.movement_cooldown
+      current = max(
+        0,
+        previous - NON_SPEAKING_ACTION_MOVEMENT_COOLDOWN_DECREMENT,
+      )
+      if current == previous:
+        continue
+      other_persona.scratch.movement_cooldown = current
+      changed.append((other_name, previous, current))
+    if changed:
+      debug_log(
+        f"[ACTION-TABLE-COOLDOWN] t={self.scratch.curr_time} | table={table.name} | "
+        f"character={self.scratch.name} | action={action_name} | "
+        f"decrement={NON_SPEAKING_ACTION_MOVEMENT_COOLDOWN_DECREMENT} | changed={changed}"
+      )
+
+  def queen_drag_blocked_by_immunity(self, table, target_name, destination=None):
+    if target_name not in table.personas:
+      return False
+    target = table.personas[target_name]
+    destination_text = f" to {destination}" if destination else ""
+    if has_nun_protection(target):
+      target.show_nun_protection(
+        table,
+        self.scratch.name,
+        "Queen",
+        target_name,
+        f"drag you{destination_text}",
+      )
+      if debug:
+        debug_log(
+          f"[QUEEN-DRAG-BLOCKED] t={self.scratch.curr_time} | table={table.name} | "
+          f"queen={self.scratch.name} | target={target_name} | destination={destination} | "
+          "reason=nun_protection"
+        )
+      return True
+    if target.scratch.role != "Farmer":
+      return False
+    act_desp = (
+      f"{target_name} reveals {target.role_card_text(role='Farmer')} and is immune to "
+      f"{self.scratch.name}'s Queen drag; {target_name} remains at {table.name}."
+    )
+    table.add_table_event(
+      (
+        target_name,
+        self.scratch.name,
+        act_desp,
+        self.scratch.curr_time,
+        set(table.personas.keys()) | {"Farmer", "Queen"},
+      )
+    )
+    target.speak(
+      table,
+      (
+        f"the Queen {self.scratch.name} has just tried to drag you{destination_text}, "
+        "but you are the Farmer and immune to the Queen ability; reveal your Farmer card now, "
+        "make clear that the drag fails before movement, and remain at this table"
+      ),
+      consume_cooldown=False,
+    )
+    if debug:
+      debug_log(
+        f"[QUEEN-DRAG-BLOCKED] t={self.scratch.curr_time} | table={table.name} | "
+        f"queen={self.scratch.name} | target={target_name} | destination={destination} | "
+        "reason=farmer_immunity"
+      )
+    return True
 
   def queen_drag_blocked_by_king_lock(self, table, target_name, destination=None):
     if target_name not in table.personas:
@@ -249,7 +320,16 @@ class Persona:
       stolen_player.scratch.ability_active = bool(remaining_targets)
 
 
-  def resolve_baron_reaction(self, table, revealed_player_name, action_context, block_ability=True):
+  def resolve_baron_reaction(
+    self,
+    table,
+    revealed_player_name,
+    action_context,
+    block_ability=True,
+    bishop_correct_guess=False,
+    bishop_target_name=None,
+    bishop_guessed_family=None,
+  ):
     if len(table.personas) < 3 or revealed_player_name not in table.personas:
       return False
     revealed_player = table.personas[revealed_player_name]
@@ -333,6 +413,13 @@ class Persona:
         special_circumstance += f", blocking {target_player.scratch.name}'s {stolen_role} ability before it resolves"
       else:
         special_circumstance += " after their reveal has already been made"
+      if block_ability and stolen_role == "Bishop" and bishop_correct_guess:
+        special_circumstance += (
+          f". Special case: the Bishop's guess that {bishop_target_name} belongs to the "
+          f"{bishop_guessed_family} family is actually correct, but if your Baron block succeeds, "
+          f"that correct guess will not exile {bishop_target_name} because the Bishop ability never resolves. "
+          "Your reaction may acknowledge or gloat about thwarting a correct guess, but must not claim the guess itself was wrong"
+        )
       baron.speak(table, special_circumstance)
       if has_nun_protection(target_player):
         if len(role_pool_for_mode()) == 16 and stolen_role == "Baron":
@@ -801,6 +888,7 @@ class Persona:
       )
       return [normal_record]
 
+    self.reset_movement_cooldown_after_action(table, f"{role.lower()}-movement-ability")
     target_name = self.select_ability_target(table, ability_reasoning)
     poss = self.possessive_for()
     obj = "her" if self.scratch.gender == "female" else "him"
@@ -822,6 +910,9 @@ class Persona:
       if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
         self.scratch.movement_cooldown = 0
         return []
+      if self.queen_drag_blocked_by_immunity(table, target_name, destination):
+        normal_record["farewell"] = False
+        return [normal_record]
       if self.queen_drag_blocked_by_king_lock(table, target_name, destination):
         normal_record["farewell"] = False
         normal_record["speech_constraint"] = (
@@ -1142,7 +1233,15 @@ class Persona:
           )
         )
         table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name, guess])))
-        if self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
+        if self.resolve_baron_reaction(
+          table,
+          self.scratch.name,
+          ability_attempt_context,
+          block_ability=True,
+          bishop_correct_guess=(guess == ROLE_DICT[target.scratch.role]["family"]),
+          bishop_target_name=target_name,
+          bishop_guessed_family=guess,
+        ):
           return
         if has_nun_protection(target):
           self.show_nun_protection(
@@ -1178,14 +1277,23 @@ class Persona:
           ". Important: a King's lock only affects already-seated players of the chosen family at this table right now. "
           "Do not say or imply that this use will trap people currently in transit, later arrivals, or anyone not physically present here"
         )
+      resolved_ability_speech_context = with_optional_speaking_reasoning(
+        with_winning_act_reasoning(
+          ability_speech_context,
+          "ability",
+        )
+      )
+      if action_role == "King":
+        seated_names = ", ".join(sorted(table.personas)) or "none"
+        transit_names = ", ".join(sorted(getattr(self.room, "transit", {}))) or "none"
+        resolved_ability_speech_context += (
+          f". FINAL AUTHORITATIVE CORRECTION: only these currently seated players can possibly be caught by this activation: {seated_names}. "
+          f"These transit players are explicitly not caught, even if they arrive immediately afterward: {transit_names}. "
+          "If the earlier bid reasoning counted an excluded player as a victim of this lock, disregard that part and do not repeat it in the line"
+        )
       self.speak(
         table,
-        with_optional_speaking_reasoning(
-          with_winning_act_reasoning(
-            ability_speech_context,
-            "ability",
-          )
-        )
+        resolved_ability_speech_context,
       )
       table.add_table_event((self.scratch.name, target_name, ability_attempt_context, self.scratch.curr_time, set([self.scratch.name, target_name])))
       if action_role != "Spinster" and self.resolve_baron_reaction(table, self.scratch.name, ability_attempt_context, block_ability=True):
@@ -1538,6 +1646,10 @@ class Persona:
         f"Only other players' cards you are holding count. You currently have {len(trophy_cards)} trophy card(s): {trophy_text}. "
         f"You need {remaining_trophies} more trophy card(s) to reach the required {required_trophies}.\n"
       )
+    personal_context_msg += (
+      f"TIME ELAPSED SINCE THE GAME STARTED: "
+      f"{timedelta_to_natural(self.scratch.curr_time)}.\n"
+    )
     return personal_context_msg
 
   

@@ -3,6 +3,8 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
+{conversation_posture}
+
 {ability_msg}
 
 
@@ -14,11 +16,13 @@ Important temporal rule: the "currently seated" lists are the current visible bo
 Current seating, lockdowns, transit state, and any endgame board context immediately before movement decision:
 {external_table_context}
 
+The player-imposed lockdown status printed for your CURRENT table is mechanically authoritative. If it says no active lockdown affects you, you are not trapped by any remembered King, Queen, or Innkeeper lock; do not plan around breaking or escaping an old lock that is no longer listed as active. Table-timer closure remains a separate restriction.
+
 {movement_semantic_reminders}
 
 {authoritative_occupancy_snapshot}
 
-Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be wanting to prepare to retrieve your card (or create the corresponding conditions for doing so), retrieving intel one table or another, leveraging Spinster location, or strategically breaking a move lock currently on your or another table, etc.. You should typically only choose to leave for another one when you have decided for now you can obtain more information elsewhere or would be safer than at the current table.
+Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be social—wanting different company, continuing or avoiding a conversation, seeking someone interesting, escaping someone irritating, boredom, restlessness, or wanting a quieter/crowded table—or game-related, such as preparing to retrieve your card, gathering intel, leveraging Spinster location, or strategically breaking a move lock. Under casual posture, social motives are sufficient on their own; under strategic posture, you should typically leave when another table offers information, safety, or mechanical advantage.
 This movement decision only chooses whether you stay or physically move. It does NOT itself use, reveal, or resolve your role ability. If your plan requires using an ability at your current table first (for example a Thief swap, Priest view, Nun gift, Baron steal, Bishop guess, King lock, or Queen/Spinster movement ability), do not describe that ability as already done merely because you are choosing a movement option. Either choose to stay so you can pursue that action through the action-bidding system, or phrase the move as seeking/setting up a future opportunity.
 Also notably, since you can recall only roughly a set number of total memories related to all of a table's occupants no matter the actual crowdedness of a table, simply "cooling your head" - i.e., retreating to a table with fewer people and thus more recallable memory density per person - i.e. people you can "think more clearly about" - is also a valid reason.
 You can either stay at your current table {current_table} or move to either of the other tables: {other_options}.
@@ -30,6 +34,6 @@ The table-specific leave timers are:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields below and without the comments.
 
-- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need (but ideally within 200 words, 250 words at MOST). Avoid using violent or harmful language.
+- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need (but ideally within 200 words, 250 words at MOST. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed)
 - "summary": "string", // A succinct version of what you want to achieve through this stay/move before and/or after arrival. Keep it within one or two short sentences. This will be used later as compact context for speech and memory. If you are not yet committed to using a movement-triggered ability, phrase it as "may use/consider using" rather than "will use/trigger".
 - "option": "string" // Based on your reasoning choose your location. Response is a single exact word (without quotation marks) from:  "stay" | {options}

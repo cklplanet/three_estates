@@ -38,7 +38,7 @@ Natural action-line discipline:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. 
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
 - "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
 - "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences.

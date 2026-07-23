@@ -3,6 +3,8 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
+{conversation_posture}
+
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
@@ -20,11 +22,12 @@ Given that {stay_at_table_reason}, and that you have now seized the chance to re
 - Speak truthfully and analytically
 - Speak half-truths while also withholding other information
 - "Reveal" your role without committing to a full card reveal
+- Following up seamlessly on the last line you said if nobody else has said anything since
 - Bluff, hint or joke about your ability use without proving
 - Deflect suspicion off yourself or allies and/or towards enemies
 - Question the veracity of others' role "reveals" or claimed Nun protection through words only that don't come with actual proper card proof (i.e., Innkeeper "declarations" that are not actually binding, or someone claiming Nun protection without showing the Nun card) and/or demanding a real reveal
 - Bluff or lie about your or others' roles (like for example bullshitting about being the Innkeeper) or your own card availability and/or ability to use ability
-- React to others' actions or provocations
+- React to others' actions, provocations, or shocking revelations
 - Or just be laconic and cryptic and throw everyone else at the table off
 - Optionally, you can weaponize the fact that voices at "practically screaming" - NOT just "loud" - volume CAN be potentially heard by other tables (and players transiting in between) in all of the ways above. Do use only sparingly though only when it's strategically necessary OR if you're getting VERY emotional
 - Or completely ignore why you wanted to speak in the first place and instead say something completely random about yourself, the others, or some random topic
@@ -39,6 +42,14 @@ The table-specific leave timers are:
 {all_table_time_left}
 
 Natural speech discipline:
+- Be as character-accurate in tone as possible.
+- When it comes naturally, vary the opening or sentence shape from your own most recent spoken line; preserve your character’s voice and do not force awkward novelty merely to be different (but you definitely ARE encouraged switch to new or extension of previous topics from what you were saying to keep the convo alive).
+- Under casual posture, prefer continuing a live non-game or interpersonal thread over inventing an abrupt random topic. A new topic is appropriate when the current one is exhausted, and may come from your personality, relationships, shared setting, complaints, curiosity, or immediate surroundings. 
+- But you're also allowed to be creative and colorful (in a character-accurate way) in prose or specific details not directly mentioned in the reasoning or your and others' backgrounds (while keeping the exact wording fresh from line to line; as in do NOT repeat the exact formatting or wording of prior lines, especially your own) when the situation calls for it;
+- - For example (non-exhaustive, mixing ordinary and profanity-enabled phrasing when character-appropriate):
+- - - "I am exhausted" in reasoning might become "My legs feel like somebody replaced the bones with wet sand" in the actual line;
+- - - "That accusation is ridiculous" might become "That is the dumbest fucking theory anyone has dragged into this room";
+- Under casual posture, do not turn an otherwise ordinary joke, story, disagreement, or personal question back into deduction unless that transition genuinely follows from the conversation or your character.
 - Say ONE thing, not a full strategic report.
 - By default, address one person or the table generally; do not accidentally answer every thread at once.
 - Addressing everyone, or naming several people one by one, is allowed when it is a deliberate strategy: calling the table to order, making a public accusation, forcing a comparison, rallying allies, or making a dramatic broadcast.
@@ -51,7 +62,7 @@ Natural speech discipline:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string", // Reasoning for what you want to verbally say right now, and to whom. Keep this to one or two concise sentences.
+- "reasoning": "string", // Reasoning for what you want to verbally say right now, and to whom. Keep this to one or two concise sentences. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" (output "everyone" exactly as is in this field in this case, all lowercase) or any other name (exactly as is including the capitalizations) at the table
 - "volume": "string", // one option from (exactly as is, all lowercase) "whisper" "calm" "loud" or "practically screaming"
-- "line": "string" // One natural spoken line. Usually one sentence; at most two short sentences. Multi-person or table-wide address is allowed when strategically intentional, but not as the default.
+- "line": "string" // One natural spoken line. Usually one sentence; at most two short sentences. Multi-person or table-wide address is allowed when strategically intentional, but not as the default. Tone not restricted (e.g. NSFW allowed) (BUT taking into account the actual dialogue context and everyone else's tone rn)

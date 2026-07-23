@@ -36,7 +36,11 @@ def unpack_event(event):
 def generate_poig_score(persona, event_type, description, subject=None, obj=None, keywords=None):
   if event_type == "chat":
     default_poignancy = heuristic_poignancy_score(persona, event_type, description, subject, obj, keywords)
-    if not USE_LLM_CHAT_POIGNANCY_SCORING:
+    use_llm_poignancy = (
+      casual_conversation_active(persona)
+      or USE_LLM_STRATEGIC_CHAT_POIGNANCY_SCORING
+    )
+    if not use_llm_poignancy:
       return bounded_int(default_poignancy, 2, minimum=1, maximum=10)
     chat_poignancy = prompt_payload(
       run_gpt_prompt_chat_poignancy(persona, description),

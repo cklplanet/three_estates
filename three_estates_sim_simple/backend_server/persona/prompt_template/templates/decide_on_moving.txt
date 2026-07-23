@@ -3,6 +3,8 @@
 GAME CONTEXT:
 - {personal_context_msg}
 
+{conversation_posture}
+
 - All information across all tables that you currently remember:
 {external_table_context}
 
@@ -12,7 +14,7 @@ GAME CONTEXT:
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
 
-Please assess the current situation and decide whether you should stay at current table or leave for another. Reasoning can be wanting to prepare to retrieve your card (or create the corresponding conditions for doing so), retrieving intel one table or another, leveraging Spinster location, or strategically breaking a move lock currently on your or another table, etc.. You should typically only choose to leave for another one when you have decided for now you can obtain more information elsewhere or would be safer than at the current table 
+Please assess the current situation and decide whether you should stay at current table or leave for another. You may move for social reasons—different company, continuing or avoiding a conversation, seeking someone interesting, boredom, restlessness, or preferring a quieter/crowded table—or for game reasons such as retrieving intel, leveraging Spinster location, or breaking a move lock. Under casual posture, social motives are sufficient on their own; under strategic posture, prioritize information, safety, and mechanical advantage.
 You can either stay at your current table {current_table} or move to either of the other two tables: {other_options}.
 There are {table_time_left} until you can no longer leave this table, and {total_time_left} until the game ends entirely.
 The table-specific leave timers are:
@@ -20,5 +22,5 @@ The table-specific leave timers are:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields below and without the comments.
 
-- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need. Avoid using violent or harmful language.
+- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need. 
 - "option": "string" // Based on your reasoning choose your location. Response is a single word (without quotation marks) from:  "stay" | {options}

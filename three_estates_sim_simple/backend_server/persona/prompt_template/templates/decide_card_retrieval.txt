@@ -23,5 +23,5 @@ There are {table_time_left} until you can no longer leave your current table, an
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to retrieve your card right now? Explain in-character your reasoning in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // How crucial is it for you to retrieve your card right now? Explain in-character your reasoning in one or two sentences. 
 - "result": "string" // exactly "yes" or "no", all lowercase

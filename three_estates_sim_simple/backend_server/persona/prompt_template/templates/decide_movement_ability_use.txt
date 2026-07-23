@@ -31,5 +31,5 @@ Decide whether you should attach your {role} ability to this departure. Treat yo
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character whether you should reveal and use the movement-triggered ability right now in one or two sentences. Avoid using violent or harmful language.
+- "reasoning": "string",  // Explain in-character whether you should reveal and use the movement-triggered ability right now in one or two sentences. 
 - "result": "string" // Response is exactly one of: "yes" | "no", all lowercase

@@ -37,8 +37,40 @@ def json_cleanup(output):
   return output
 
 
+def run_gpt_prompt_assign_immersion_roles(character_group_context, character_profiles, role_pool_text, role_rulebook, test_input=None, verbose=False):
+  data = {
+    "character_group_context": character_group_context,
+    "character_profiles": character_profiles,
+    "role_pool_text": role_pool_text,
+    "role_rulebook": role_rulebook,
+  }
+  prompt = read_prompt_template("persona/prompt_template/templates/assign_immersion_roles.txt")
+  final_prompt = prompt.format(**data)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=CHARACTER_GENERATION_LLM_MODEL,
+  )
+  if output != False:
+    return output, [output, prompt, data]
+
+
 def text_cleanup(output):
   return output.strip()
+
+
+def game_summary_epilogue_cleanup(output):
+  summary_start = "<game_summary>"
+  summary_end = "</game_summary>"
+  epilogue_start = "<vn_epilogue>"
+  epilogue_end = "</vn_epilogue>"
+  if not all(marker in output for marker in (summary_start, summary_end, epilogue_start, epilogue_end)):
+    raise ValueError("Combined game-summary/epilogue response is missing a required section marker")
+  summary = output.split(summary_start, 1)[1].split(summary_end, 1)[0].strip()
+  epilogue = output.split(epilogue_start, 1)[1].split(epilogue_end, 1)[0].strip()
+  if not summary or not epilogue:
+    raise ValueError("Combined game-summary/epilogue response contains an empty section")
+  return {"game_summary": summary, "vn_epilogue": epilogue}
 
 
 def run_gpt_prompt_generate_character(character_group_context, existing_character_choices, name_mode, test_input=None, verbose=False): 
@@ -95,6 +127,24 @@ def run_gpt_prompt_generate_vn_epilogue(epilogue_context, test_input=None, verbo
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=EPILOGUE_GENERATION_LLM_MODEL)
   if output != False:
     return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_game_summary_and_vn_epilogue(epilogue_context, test_input=None, verbose=False):
+  data = {
+    "PREFIX": PREFIX,
+    "epilogue_context": epilogue_context,
+  }
+  prompt_template = "persona/prompt_template/templates/generate_game_summary_and_vn_epilogue.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=game_summary_epilogue_cleanup,
+    model=EPILOGUE_GENERATION_LLM_MODEL,
+  )
+  if output != False:
+    return output, [output, prompt, data]
   
 
 def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=None, verbose=False): 
@@ -112,6 +162,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
     "table_time_left": data['table_time_left'],
     "all_table_time_left": data['all_table_time_left'],
     "total_time_left": data['total_time_left'],
+    "conversation_posture": data['conversation_posture'],
   }
 
   speech_reason = persona.scratch.act_reasoning
@@ -122,7 +173,11 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
+  )
   print(output)
   
   if output != False: 
@@ -152,10 +207,37 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
   prompt = read_prompt_template(prompt_template)
   final_prompt = prompt.format(**data_sub)
 
-  output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
+  )
   #print(output)
   
   if output != False: 
+    return output, [output, prompt, data]
+
+
+def run_gpt_prompt_chat_poignancy(persona, chat, test_input=None, verbose=False):
+  data = {
+    "PREFIX": PREFIX,
+    "personal_game_context": persona.get_personal_game_context(),
+    "current_line": chat,
+  }
+  prompt_template = (
+    "persona/prompt_template/templates/poignancy_chat_casual.txt"
+    if casual_conversation_active(persona)
+    else "persona/prompt_template/templates/poignancy_chat.txt"
+  )
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**data)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=int,
+    model=POIGNANCY_SCORING_LLM_MODEL,
+    reasoning_effort="none",
+  )
+  if output != False:
     return output, [output, prompt, data]
 
 def run_gpt_prompt_act_bidding_ability(persona, table, test_input=None, verbose=False): 
@@ -305,6 +387,7 @@ def get_bidding_common_data(persona, table):
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
+    "conversation_posture": conversation_posture_prompt(persona),
   }
 
   return data
@@ -382,7 +465,8 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     "table_time_left": table_time_left,
     "all_table_time_left": all_table_time_left,
     "total_time_left": total_time_left,
-    "options": options
+    "options": options,
+    "conversation_posture": conversation_posture_prompt(persona),
   }
 
   prompt_template = "persona/prompt_template/templates/decide_on_moving.txt"
