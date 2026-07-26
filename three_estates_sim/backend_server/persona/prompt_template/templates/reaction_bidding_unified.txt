@@ -45,6 +45,6 @@ Pick the action and bid score that best match your current urgency. Do not choos
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string"  // Explain in-character why this single action is the one you most want right now in one or two sentences. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed
+- "reasoning": "string"  // Explain candidly and in character why this single action is the one you most want right now in one or two sentences.
 - "action": "string"     // exactly one available action id, such as "none", "speak", "reveal", "nun-reveal", "ability", or "retrieve"
 - "bid": "string"        // exactly one of the allowed bid scores for that chosen action

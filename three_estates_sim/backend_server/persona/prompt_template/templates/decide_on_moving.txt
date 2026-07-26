@@ -34,6 +34,6 @@ The table-specific leave timers are:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields below and without the comments.
 
-- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain in-character your reasoning to as much detail as you need (but ideally within 200 words, 250 words at MOST. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed)
+- "reasoning": "string",  // Should you stay at the current table for now, or should you leave for any of the other two tables? Explain your candid, character-accurate reasoning in as much detail as needed, ideally within 200 words and at most 250 words.
 - "summary": "string", // A succinct version of what you want to achieve through this stay/move before and/or after arrival. Keep it within one or two short sentences. This will be used later as compact context for speech and memory. If you are not yet committed to using a movement-triggered ability, phrase it as "may use/consider using" rather than "will use/trigger".
 - "option": "string" // Based on your reasoning choose your location. Response is a single exact word (without quotation marks) from:  "stay" | {options}

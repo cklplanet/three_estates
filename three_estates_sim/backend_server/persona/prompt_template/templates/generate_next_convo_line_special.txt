@@ -46,16 +46,16 @@ Natural action-line discipline:
 - Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
 - Emotion, implication, and subtext are better than explanation.
 - But you're also allowed to be creative and colorful (in a character-accurate way) in prose or specific about details not directly mentioned in the reasoning or your and others' backgrounds (while keeping the exact wording fresh from line to line; as in do NOT repeat the exact formatting or wording of prior lines, especially your own) when the situation calls for it;
-- - For example (non-exhaustive, mixing ordinary and profanity-enabled phrasing when character-appropriate):
-- - - "I am exhausted" in reasoning might become "My legs feel like somebody replaced the bones with wet sand" in the actual line;
-- - - "That accusation is ridiculous" might become "That is the dumbest fucking theory anyone has dragged into this room";
+- - For example (non-exhaustive):
+- - - "I am furious about the accusation" in reasoning might become "Try saying that again while looking me in the eye" in the actual line;
+- - - similarly, "I need everyone to pay attention" might become a sharp command, theatrical interruption, or dry remark that fits the character;
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three sentences. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed
+- "reasoning": "string",  // Given EVERYTHING you can recall right now as listed out in this prompt, explain in-character (first-person) what you should speak briefly to accompany your action, and to whom. Explain your reasoning in up to two or three candid, character-accurate sentences.
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" or any other name at the table
 - "volume": "string", // either (exactly as is, no capitalization) "whisper" "calm" "loud" or "practically screaming"
 - "expression": "string", // 1-3 words describing the visible facial expression or emotional presentation
 - "action": "string", // A third-person physical beat under 60 characters, without the character's name or a final period, such as "shows the card" or "does nothing". Do not put spoken words here
-- "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences. Tone not restricted (e.g. NSFW allowed) (BUT only taking into account the actual dialogue context and everyone else's tone rn). Use appropriate diction for the volume, such as loud lines often ending with exclamation marks and practically screaming lines optionally being all-caps.
+- "line": "string" // One brief accompanying line, as if spoken in the moment. Usually one sentence; at most two short sentences. Match the character, actual dialogue context, and everyone else's current tone. Use appropriate diction for the volume, such as loud lines often ending with exclamation marks and practically screaming lines optionally being all-caps.
