@@ -22,11 +22,14 @@ Current final-table seating and board context immediately before guessing:
 {current_table_context}
 
 Choose exactly one valid role for every listed player. Do not include yourself in the guesses. If uncertain, make the best strategic guess from memory, claims, card-backed reveals, ability events, alliances, and win-condition behavior.
+Also provide an "expression" of 1-3 words and an "action": a third-person physical beat under 60 characters, without your name or a final period.
 
 Return ONLY the JSON dict below, in proper JSON format, with exactly these fields and no additional comments:
 
 {{
   "reasoning": "string",
+  "expression": "string",
+  "action": "string",
   "line": "string",
   "guesses": {{
     "Player Name": "Role"

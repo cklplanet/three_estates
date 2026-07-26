@@ -38,6 +38,8 @@ class Scratch:
     self.age = None
     # L0 permanent core traits.  
     self.innate = None
+    self.innate_appearance = ""
+    self.clothing = ""
     # L1 stable traits.
 
     # New reflection variables
@@ -69,6 +71,7 @@ class Scratch:
     self.retrieved = None
     self.act_reasoning = None
     self.relationships = dict()
+    self.game_specific_relationship_contexts = dict()
     self.group_context = None
     self.movement_cooldown = STARTING_MOVEMENT_COOLDOWN_STEPS
     self.speaking_cooldown = 0
@@ -94,6 +97,8 @@ class Scratch:
         self.gender = scratch_load["gender"]
         self.age = scratch_load["age"]
         self.innate = scratch_load["innate"]
+        self.innate_appearance = scratch_load.get("innate_appearance", "")
+        self.clothing = scratch_load.get("clothing", "")
 
         self.recency_w = scratch_load["recency_w"]
         self.relevance_w = scratch_load["relevance_w"]
@@ -124,6 +129,9 @@ class Scratch:
         self.retrieved = scratch_load["retrieved"]
         self.act_reasoning = scratch_load["act_reasoning"]
         self.relationships = scratch_load["relationships"]
+        self.game_specific_relationship_contexts = dict(
+          scratch_load.get("game_specific_relationship_contexts", {})
+        )
         self.group_context = scratch_load["group_context"]
         self.movement_cooldown = scratch_load.get("movement_cooldown", self.movement_cooldown)
         self.speaking_cooldown = scratch_load.get("speaking_cooldown", self.speaking_cooldown)
@@ -144,6 +152,8 @@ class Scratch:
     scratch["age"] = self.age
     scratch["gender"] = self.gender
     scratch["innate"] = self.innate
+    scratch["innate_appearance"] = self.innate_appearance
+    scratch["clothing"] = self.clothing
     scratch["recency_w"] = self.recency_w
     scratch["relevance_w"] = self.relevance_w
     scratch["importance_w"] = self.importance_w
@@ -169,6 +179,7 @@ class Scratch:
     scratch["retrieved"] = None
     scratch["act_reasoning"] = self.act_reasoning
     scratch["relationships"] = self.relationships
+    scratch["game_specific_relationship_contexts"] = self.game_specific_relationship_contexts
     scratch["group_context"] = self.group_context
     scratch["movement_cooldown"] = self.movement_cooldown
     scratch["speaking_cooldown"] = self.speaking_cooldown

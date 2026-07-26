@@ -14,7 +14,7 @@ class Location:
         self.connected = set()     # NAMES of adjacent locations
         self.revealed_cards = []
         self.events = set()        # events (and events corresponding to objects) happening at this location? maybe?
-        self.current_lines = [] # format: list of ((subject, object, volume, contents, timestamp, audience, keywords))
+        self.current_lines = [] # format: list of ((subject, object, volume, expression, action, contents, timestamp, audience, keywords))
         self.dialogue_history = [] # append-only dialogue lines for perception/logging
         self.current_events = [] # format: list of ((subject, object, act_desp, timestamp, keywords))
         self.event_history = [] # append-only table actions for perception/logging
@@ -60,16 +60,29 @@ class Location:
     def add_table_dialogue(self, dialogue_tuple):
         if len(dialogue_tuple) == 6:
             speaker, target, volume, line, timestamp, keywords = dialogue_tuple
+            expression, action = "neutral", "does nothing"
             audience = set(self.personas.keys())
             keywords = set(keywords) | audience
-            dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
-        speaker, target, volume, line, timestamp, audience, keywords = dialogue_tuple
-        keywords = set(keywords or []) | role_keywords_from_text(line)
-        dialogue_tuple = (speaker, target, volume, line, timestamp, audience, keywords)
+        elif len(dialogue_tuple) == 7:
+            speaker, target, volume, line, timestamp, audience, keywords = dialogue_tuple
+            expression, action = "neutral", "does nothing"
+        elif len(dialogue_tuple) == 8:
+            speaker, target, volume, expression, action, line, timestamp, keywords = dialogue_tuple
+            audience = set(self.personas.keys())
+            keywords = set(keywords) | audience
+        else:
+            speaker, target, volume, expression, action, line, timestamp, audience, keywords = dialogue_tuple
+        expression = normalize_dialogue_expression(expression)
+        action = normalize_dialogue_action(action)
+        keywords = set(keywords or []) | role_keywords_from_text(f"{action} {line}")
+        dialogue_tuple = (speaker, target, volume, expression, action, line, timestamp, set(audience or []), keywords)
         self.current_lines.append(dialogue_tuple)
         self.dialogue_history.append(dialogue_tuple)
         write_dialogue_log(self.name, dialogue_tuple)
-        print(f"({self.name})" + dialogue_tuple[0] + f"(to {dialogue_tuple[1]}):" + f" ({dialogue_tuple[2]})" + f" {dialogue_tuple[3]}")
+        print(
+            f"({self.name}) {speaker} -> {target} "
+            f"[{volume}, {expression}]: {format_dialogue_payload(action, line)}"
+        )
 
 
 class RoomGraph:

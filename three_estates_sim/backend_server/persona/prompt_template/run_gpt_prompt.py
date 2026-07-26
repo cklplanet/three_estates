@@ -60,6 +60,19 @@ def game_summary_epilogue_cleanup(output):
   return {"game_summary": summary, "vn_epilogue": epilogue}
 
 
+def latest_table_line_reminder(persona, table):
+  for utterance in reversed(getattr(table, "dialogue_history", [])):
+    speaker, target, volume, expression, action, line, _timestamp, audience, _keywords = unpack_dialogue_fields(utterance)
+    if audience and persona.scratch.name not in audience:
+      continue
+    target = target or "everyone"
+    return (
+      f"{speaker} -> {target} [{volume}, {expression}]: "
+      f"{format_dialogue_payload(action, line)}"
+    )
+  return "none yet"
+
+
 def movement_duration_hint(persona=None):
   endgame_mode = bool(persona and getattr(persona.room, "endgame_mode", False))
   if endgame_mode:
@@ -227,8 +240,12 @@ def format_authoritative_occupancy_snapshot(room):
     seated_count = len(seated_names)
     if seated_names:
       player_word = "player" if seated_count == 1 else "players"
+      seated_labels = [
+        visual_character_label(table.personas[name])
+        for name in seated_names
+      ]
       lines.append(
-        f"- {table_name}: {seated_count} seated {player_word} -- {', '.join(seated_names)}\n"
+        f"- {table_name}: {seated_count} seated {player_word} -- {'; '.join(seated_labels)}\n"
       )
     else:
       lines.append(f"- {table_name}: 0 seated players -- no seated players\n")
@@ -260,7 +277,7 @@ def format_endgame_board_context(persona, retrieved_all_tables, format_memory_li
       lines.append("\tNo players currently seated there.\n")
       continue
     for player_name, player_dict in table_dict.items():
-      lines.append(f"\t{player_name}\n")
+      lines.append(f"\t{visual_character_label_by_name(persona.room, player_name)}\n")
       event_lines = []
       for event in player_dict.get("events", []):
         if claim_node(event):
@@ -319,6 +336,55 @@ def run_gpt_prompt_generate_character(character_group_context, existing_characte
   #print(output) #debug
   
   if output != False: 
+    return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_innate_appearance(persona, character_group_context, test_input=None, verbose=False):
+  data = {
+    "character_group_context": character_group_context,
+    "name": persona.scratch.name,
+    "gender": persona.scratch.gender,
+    #"age": persona.scratch.age,
+    "innate": persona.scratch.innate,
+  }
+  prompt = read_prompt_template("persona/prompt_template/templates/generate_innate_appearance.txt")
+  final_prompt = prompt.format(**data)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=CHARACTER_GENERATION_LLM_MODEL,
+  )
+  if output != False:
+    return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_clothing(persona, character_group_context, test_input=None, verbose=False):
+  if isinstance(persona, dict):
+    profile = persona
+  else:
+    profile = {
+      "name": persona.scratch.name,
+      "gender": persona.scratch.gender,
+      "age": persona.scratch.age,
+      "innate": persona.scratch.innate,
+      "innate_appearance": persona.scratch.innate_appearance,
+    }
+  data = {
+    "character_group_context": character_group_context,
+    "name": profile.get("name", "Unknown"),
+    "gender": profile.get("gender", "unknown"),
+    "age": profile.get("age", "unknown"),
+    "innate": profile.get("innate", ""),
+    "innate_appearance": profile.get("innate_appearance", ""),
+  }
+  prompt = read_prompt_template("persona/prompt_template/templates/generate_clothing.txt")
+  final_prompt = prompt.format(**data)
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=json_cleanup,
+    model=CHARACTER_GENERATION_LLM_MODEL,
+  )
+  if output != False:
     return output, [output, prompt, data]
 
 
@@ -417,6 +483,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
     "current_table_context": data['current_table_context'],
     "ability_msg": data['ability_msg'],
     "recent_conversation": data['recent_conversation'],
+    "latest_table_line_reminder": data['latest_table_line_reminder'],
     "current_table_events": data['current_table_events'],
     "current_table_additional_context": data['current_table_additional_context'],
     "stay_at_table_reason": data['stay_at_table_reason'],
@@ -455,6 +522,7 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
     "current_table_context": data['current_table_context'],
     "ability_msg": data['ability_msg'],
     "recent_conversation": data['recent_conversation'],
+    "latest_table_line_reminder": data['latest_table_line_reminder'],
     "current_table_events": data['current_table_events'],
     "current_table_additional_context": data['current_table_additional_context'],
     "stay_at_table_reason": data['stay_at_table_reason'],
@@ -715,7 +783,7 @@ def get_bidding_common_data(persona, table, action_context=""):
   current_table_context += format_table_lockdown_status(table, persona.scratch.name)
   current_table_context += format_transit_status(persona.room, persona.scratch.curr_time)
   for other_player, other_player_dict in dict.items():
-    current_table_context += f"\t{other_player}\n"
+    current_table_context += f"\t{visual_character_label_by_name(persona.room, other_player)}\n"
     current_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
     for event in other_player_dict["events"]:
       if claim_node(event):
@@ -767,7 +835,7 @@ def get_bidding_common_data(persona, table, action_context=""):
   total_time_left = timedelta_to_natural(game_end_time() - persona.scratch.curr_time)
       
   stay_at_table_reason = build_stay_at_table_reason(persona, table)
-  last_act_reasoning = f"your strongest bidding reasoning moments ago was: {persona.scratch.act_reasoning} (Do rephrase or reevaluate whether this still applies or something fresher is better, for example if you actually answered an earlier question by others, or if you've asked something multiple times in a row then whether you should shut up and wait for an answer)" if persona.scratch.act_reasoning else "you haven't really thought about doing anything yet"
+  last_act_reasoning = f"your strongest bidding reasoning moments ago was: {persona.scratch.act_reasoning} (Do reevaluate whether this still applies and DO update based on the actual most recent line spoken at the table, for example if you actually answered an earlier question by others, or if you've asked something multiple times in a row then whether you should shut up and wait for an answer)" if persona.scratch.act_reasoning else "you haven't really thought about doing anything yet"
   ability_bid_action_clarification = (
     "For this prompt in particular, you want to for now decide that, if simply talking alone can't help you achieve your goals, "
     "how urgently you want to use your ability (and in the process reveal your role at everyone at your current table) to the conversation in particular. "
@@ -781,6 +849,7 @@ def get_bidding_common_data(persona, table, action_context=""):
     "action_context": f"Immediate action context:\n{action_context}\n" if action_context else "",
     "ability_msg": ability_msg,
     "recent_conversation": recent_conversation,
+    "latest_table_line_reminder": latest_table_line_reminder(persona, table),
     "current_table_events": current_table_events,
     "current_table_additional_context": current_table_additional_context,
     "other_table_additional_context": other_table_additional_context,
@@ -873,7 +942,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
     external_table_context += new_line
     external_table_context += format_table_lockdown_status(persona.room.locations[table_name], persona.scratch.name, "\t")
     for other_player, other_player_dict in dict.items():
-      external_table_context += f"\t{other_player}\n"
+      external_table_context += f"\t{visual_character_label_by_name(persona.room, other_player)}\n"
       external_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
       for event in other_player_dict["events"]:
         if not claim_node(event):
@@ -1308,7 +1377,7 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
     external_table_context += new_line
     external_table_context += format_table_lockdown_status(persona.room.locations[table_name], persona.scratch.name, "\t")
     for other_player, other_player_dict in dict.items():
-      external_table_context += f"\t{other_player}\n"
+      external_table_context += f"\t{visual_character_label_by_name(persona.room, other_player)}\n"
       external_table_context += f"\tRelevant past events about this player (memory only; not necessarily current board state):\n"
       for event in other_player_dict["events"]:
         if not claim_node(event):

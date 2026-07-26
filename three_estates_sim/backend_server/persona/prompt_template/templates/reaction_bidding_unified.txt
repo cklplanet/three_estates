@@ -7,6 +7,7 @@ GAME CONTEXT:
 
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
+MOST RECENT TABLE LINE: {latest_table_line_reminder}
 
 {current_table_events}
 {current_table_additional_context}

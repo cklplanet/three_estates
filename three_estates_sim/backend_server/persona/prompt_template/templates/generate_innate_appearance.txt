@@ -1,0 +1,22 @@
+You are adding a concise innate physical appearance field to a character profile.
+
+Group context:
+{character_group_context}
+
+Character:
+- name: {name}
+- gender: {gender}
+- personality/background: {innate}
+
+Write ONLY innate physical traits: hair, skin/complexion, facial features, height, build, or special features if applicable (freckles, scars, etc). Do not mention clothing, accessories, poses, expressions, personality, role, or temporary condition. For an established character, use their recognizable canonical appearance rather than inventing a redesign. For females, can include a brief, non-numeric description of breast size when it is visually relevant.
+
+The result must be under 80 characters, a compact comma-separated fragment rather than a sentence, with no final period.
+
+Style examples:
+- Nagito Komaeda: "messy white hair, slim and average build, slightly albino"
+- Peko Pekoyama: "statuesque but slim, silver-haired, breasts sizable but not bloated"
+
+Return ONLY valid JSON:
+{{
+  "innate_appearance": "string"
+}}

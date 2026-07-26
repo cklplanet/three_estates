@@ -7,6 +7,7 @@ GAME CONTEXT:
 
 The conversations you have participated in so far for the last several minutes have been as follows:
 {recent_conversation}
+MOST RECENT TABLE LINE: {latest_table_line_reminder}
 
 {current_table_events}
 {current_table_additional_context}
@@ -65,4 +66,6 @@ return ONLY the json dict below (in proper python json format with brackets) wit
 - "reasoning": "string", // Reasoning for what you want to verbally say right now, and to whom. Keep this to one or two concise sentences. Tone not restricted; as absolutely truthful to the raw thoughts of a character as possible, e.g. NSFW / swearing allowed
 - "object": "string", // the object you're going to speak to. can be either exactly "everyone" (output "everyone" exactly as is in this field in this case, all lowercase) or any other name (exactly as is including the capitalizations) at the table
 - "volume": "string", // one option from (exactly as is, all lowercase) "whisper" "calm" "loud" or "practically screaming"
-- "line": "string" // One natural spoken line. Usually one sentence; at most two short sentences. Multi-person or table-wide address is allowed when strategically intentional, but not as the default. Tone not restricted (e.g. NSFW allowed) (BUT taking into account the actual dialogue context and everyone else's tone rn)
+- "expression": "string", // 1-3 words describing the visible facial expression or emotional presentation, such as "wry smile", "visibly annoyed", or "deadpan"
+- "action": "string", // A third-person physical beat under 60 characters, written without the character's name or a final period, such as "leans across the table" or "does nothing". Do not put spoken words here
+- "line": "string" // One natural spoken line. Usually one sentence; at most two short sentences. Multi-person or table-wide address is allowed when strategically intentional, but not as the default. Tone not restricted (e.g. NSFW allowed) (BUT taking into account the actual dialogue context and everyone else's tone rn). Use appropriate diction for the volume, such as loud lines often ending with exclamation marks and practically screaming lines optionally being all-caps.

@@ -14,13 +14,7 @@ from persona.prompt_template.gpt_structure import *
 from persona.prompt_template.run_gpt_prompt import *
 
 def unpack_dialogue(utterance):
-  if len(utterance) == 6:
-    s_chat, o_chat, volume, line, timestamp_chat, keywords_chat = utterance
-    audience = set()
-  else:
-    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = utterance
-    audience = set(audience)
-  return s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat
+  return unpack_dialogue_fields(utterance)
 
 
 def unpack_event(event):
@@ -110,13 +104,17 @@ def perceive(persona, room):
   persona.scratch.dialogue_cursors[persona.scratch.curr_loc] = len(current_table.dialogue_history)
 
   for utterance in local_dialogue:
-    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
+    s_chat, o_chat, volume, expression, action, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
     if audience and persona.scratch.name not in audience:
       continue
     if not o_chat:
       o_chat = f"all of {persona.scratch.curr_loc}"
     audience_text = ", ".join(sorted(audience)) if audience else "unknown"
-    line = f"{s_chat}, to {o_chat}: ({volume}) {line} [People physically present for this line: {audience_text}]"
+    line = (
+      f"{s_chat}, to {o_chat}: [{volume}, {expression}] "
+      f"{format_dialogue_payload(action, line)} "
+      f"[People physically present for this line: {audience_text}]"
+    )
     chat_poignancy = generate_poig_score(persona, "chat", line, s_chat, o_chat, keywords_chat)
     line_embedding_in = line
     if line_embedding_in in persona.a_mem.embeddings: 
@@ -128,7 +126,7 @@ def perceive(persona, room):
                         line, keywords_chat, chat_poignancy, 
                         chat_embedding_pair)]
     persona.scratch.importance_ele_n += 1
-  # format: (subject, object, volume, contents, timestamp, keywords)
+  # format: (subject, object, volume, expression, action, contents, timestamp, audience, keywords)
 
   other_table_ret_events = []
   # should I tiebreak in case both tables end up screaming?
@@ -140,10 +138,14 @@ def perceive(persona, room):
     overheard_dialogue = other_location.dialogue_history[overheard_cursor:audible_limit]
     persona.scratch.overheard_dialogue_cursors[other_table] = audible_limit
     for utterance in overheard_dialogue:
-      s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
+      s_chat, o_chat, volume, expression, action, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(utterance)
       if volume == "practically screaming":
         audience_text = ", ".join(sorted(audience)) if audience else "unknown"
-        line = f"{s_chat}: ({volume}, overheard from the {other_table}; people physically present there: {audience_text}) {line}"
+        line = (
+          f"{s_chat}: [{volume}, overheard from the {other_table}; "
+          f"people physically present there: {audience_text}] "
+          f"{line}"
+        )
         chat_poignancy = generate_poig_score(persona, "chat", line, s_chat, o_chat, keywords_chat)
         line_embedding_in = line
         if line_embedding_in in persona.a_mem.embeddings: 

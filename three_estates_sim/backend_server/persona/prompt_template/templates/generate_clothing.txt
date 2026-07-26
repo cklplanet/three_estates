@@ -1,0 +1,24 @@
+You are adding a concise clothing field to a character profile.
+
+Group context:
+{character_group_context}
+
+Character:
+- name: {name}
+- gender: {gender}
+- age: {age}
+- personality/background: {innate}
+- innate appearance: {innate_appearance}
+
+Describe only what the character is wearing for this game. For an established character, prefer their recognizable canonical clothing unless the group context clearly specifies another outfit. Do not repeat innate body traits, describe poses or expressions, or write a full sentence.
+
+The result must be under 70 characters, with no final period.
+
+Style examples:
+- Nagito Komaeda: "green coat over white shirt underneath and green trousers"
+- Peko Pekoyama: "black sailor-fuku"
+
+Return ONLY valid JSON:
+{{
+  "clothing": "string"
+}}

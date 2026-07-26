@@ -667,7 +667,10 @@ def casual_conversation_transition_time():
 
 def casual_conversation_active(persona_or_room):
     room = getattr(persona_or_room, "room", persona_or_room)
-    if getattr(room, "conversation_mode", "strategic") != "casual":
+    mode = getattr(room, "conversation_mode", "strategic")
+    if mode == "ultra_casual":
+        return True
+    if mode != "casual":
         return False
     scratch = getattr(persona_or_room, "scratch", None)
     curr_time = getattr(scratch, "curr_time", None)
@@ -684,9 +687,14 @@ def conversation_posture_prompt(persona):
     room = getattr(persona, "room", None)
     mode = getattr(room, "conversation_mode", "strategic")
     if casual_conversation_active(persona):
+        posture_heading = (
+            "CONVERSATIONAL POSTURE — ULTRA CASUAL, ENTIRE GAME:\n"
+            if mode == "ultra_casual"
+            else "CONVERSATIONAL POSTURE — CASUAL, EARLY GAME:\n"
+        )
         return (
-            "CONVERSATIONAL POSTURE — CASUAL, EARLY GAME:\n"
-            "Treat the social-deduction game as the reason everyone is gathered, not as the only worthwhile subject or an objective that must dominate every turn. "
+            posture_heading
+            + "Treat the social-deduction game as the reason everyone is gathered, not as the only worthwhile subject or an objective that must dominate every turn. "
             "Ordinary social impulses are real goals: continue an interesting topic, joke, tease, argue, gossip, complain, tell a story, ask something personal, sit in an awkward silence, or react to someone's personality. "
             "A good conversational continuation can deserve as much urgency as a tactical remark. Do not append a role accusation or game question to an otherwise casual line merely to make it useful. "
             "Casual does not mean friendly or frivolous; remain fully in character. Immediate threats, direct questions, formal game events, forced reactions, and genuinely urgent mechanical opportunities still override this posture."
@@ -1028,31 +1036,109 @@ def write_table_event_log(table_name, event_tuple):
             outfile.write(f"[{timestamp}] EVENT ({table_name}): {description}\n")
 
 
+def normalize_dialogue_expression(expression):
+    words = str(expression or "neutral").strip().split()
+    return " ".join(words[:3]) or "neutral"
+
+
+def compact_profile_field(value, max_characters):
+    value = " ".join(str(value or "").strip().split()).rstrip(".")
+    if len(value) <= max_characters:
+        return value
+    shortened = value[:max_characters].rstrip()
+    if " " in shortened:
+        shortened = shortened.rsplit(" ", 1)[0]
+    return shortened.rstrip(" ,.;:")
+
+
+def visual_character_label(persona):
+    name = str(getattr(getattr(persona, "scratch", None), "name", None) or getattr(persona, "name", "Unknown"))
+    appearance = compact_profile_field(
+        getattr(getattr(persona, "scratch", None), "innate_appearance", ""),
+        80,
+    )
+    if not appearance:
+        return name
+    clothing = compact_profile_field(
+        getattr(getattr(persona, "scratch", None), "clothing", ""),
+        70,
+    )
+    label = f"{name}, appearance: {appearance}"
+    if clothing:
+        label += f", wearing {clothing}"
+    return label
+
+
+def visual_character_label_by_name(room, name):
+    persona = getattr(room, "personas", {}).get(name)
+    return visual_character_label(persona) if persona is not None else str(name)
+
+
+def normalize_dialogue_action(action):
+    action = str(action or "does nothing").strip().rstrip(".")
+    if not action:
+        return "does nothing"
+    if len(action) > 70:
+        shortened = action[:70].rstrip()
+        if " " in shortened:
+            shortened = shortened.rsplit(" ", 1)[0]
+        action = shortened.rstrip(".") or "does nothing"
+    return action
+
+
+def unpack_dialogue_fields(dialogue_tuple):
+    if len(dialogue_tuple) == 9:
+        speaker, target, volume, expression, action, line, timestamp, audience, keywords = dialogue_tuple
+    elif len(dialogue_tuple) == 8:
+        speaker, target, volume, expression, action, line, timestamp, keywords = dialogue_tuple
+        audience = []
+    elif len(dialogue_tuple) == 7:
+        speaker, target, volume, line, timestamp, audience, keywords = dialogue_tuple
+        expression, action = "neutral", "does nothing"
+    elif len(dialogue_tuple) == 6:
+        speaker, target, volume, line, timestamp, keywords = dialogue_tuple
+        expression, action, audience = "neutral", "does nothing", []
+    else:
+        raise ValueError(f"Unsupported dialogue record with {len(dialogue_tuple)} fields")
+    return (
+        speaker,
+        target,
+        volume,
+        normalize_dialogue_expression(expression),
+        normalize_dialogue_action(action),
+        line,
+        timestamp,
+        set(audience or []),
+        set(keywords or []),
+    )
+
+
+def format_dialogue_payload(action, line):
+    return f"({normalize_dialogue_action(action)}) {line}"
+
+
 def write_dialogue_log(table_name, dialogue_tuple):
     if DIALOGUE_LOG_PATH is None and CLEAN_DIALOGUE_LOG_PATH is None:
         return
-    if len(dialogue_tuple) == 6:
-        speaker, target, volume, line, timestamp, _keywords = dialogue_tuple
-        audience = []
-    else:
-        speaker, target, volume, line, timestamp, audience, _keywords = dialogue_tuple
+    speaker, target, volume, expression, action, line, timestamp, audience, _keywords = unpack_dialogue_fields(dialogue_tuple)
     audience_text = ", ".join(sorted(str(player) for player in audience)) if audience else "unknown"
+    rendered_line = format_dialogue_payload(action, line)
     if DIALOGUE_LOG_PATH is not None:
         with open(DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
-    advanced_line = f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]"
+            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]\n")
+    advanced_line = f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]"
     append_table_specific_log(table_name, advanced_line)
     append_character_specific_log(set(audience or []) | {speaker, target}, advanced_line)
     if volume == "practically screaming":
         overheard_line = (
             f"[{timestamp}] DIALOGUE (overheard from {table_name}) {speaker} -> {target} "
-            f"[{volume}]: {line} | audience=[{audience_text}]"
+            f"[{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]"
         )
         append_all_table_specific_logs(overheard_line, exclude_table=table_name)
         append_all_character_specific_logs(overheard_line, exclude_characters=set(audience or []) | {speaker, target})
     if CLEAN_DIALOGUE_LOG_PATH is not None:
         with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}]: {line} | audience=[{audience_text}]\n")
+            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]\n")
 
 
 def debug_bid(persona, table, action, bid, reasoning):

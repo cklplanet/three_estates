@@ -38,4 +38,6 @@ Return ONLY the json dict below.
 - "response": "string", // exactly one of: "hard reveal" | "soft reveal" | "no reveal"
 - "object": "string", // either exactly "everyone" or one player currently at the table
 - "volume": "string", // exactly one of: "whisper" | "calm" | "loud" | "practically screaming"
+- "expression": "string", // 1-3 words describing the visible facial expression or emotional presentation
+- "action": "string", // A third-person physical beat under 60 characters, without the character's name or a final period, such as "taps the card against the table" or "does nothing"
 - "line": "string" // The spoken line.

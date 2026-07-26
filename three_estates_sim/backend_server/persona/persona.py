@@ -626,6 +626,8 @@ class Persona:
       "reasoning": "I need to say something brief and relevant.",
       "object": "everyone",
       "volume": "calm",
+      "expression": "neutral",
+      "action": "does nothing",
       "line": "I need a moment to think this through.",
     }
     speak_dict = {**default_line, **(speak_dict or {})}
@@ -633,11 +635,13 @@ class Persona:
       speak_dict["object"] = "everyone"
     if speak_dict["volume"] not in {"whisper", "calm", "loud", "practically screaming"}:
       speak_dict["volume"] = "calm"
+    speak_dict["expression"] = normalize_dialogue_expression(speak_dict.get("expression"))
+    speak_dict["action"] = normalize_dialogue_action(speak_dict.get("action"))
     speak_dict["line"] = str(speak_dict.get("line") or default_line["line"]).strip() or default_line["line"]
     return speak_dict
 
   def remember_own_dialogue(self, table, dialogue_tuple):
-    s_chat, o_chat, volume, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(dialogue_tuple)
+    s_chat, o_chat, volume, expression, action, line, timestamp_chat, audience, keywords_chat = unpack_dialogue(dialogue_tuple)
     if s_chat != self.scratch.name:
       return
     if audience and self.scratch.name not in audience:
@@ -645,7 +649,8 @@ class Persona:
     target_text = o_chat or f"all of {table.name}"
     audience_text = ", ".join(sorted(audience)) if audience else "unknown"
     description = (
-      f"{s_chat}, to {target_text}: ({volume}) {line} "
+      f"{s_chat}, to {target_text}: [{volume}, {expression}] "
+      f"{format_dialogue_payload(action, line)} "
       f"[People physically present for this line: {audience_text}]"
     )
     chat_poignancy = generate_perception_poig_score(
@@ -677,7 +682,16 @@ class Persona:
 
   def emit_speech_dict(self, table, speak_dict, consume_cooldown=True):
     speak_dict = self.normalize_speech_dict(table, speak_dict)
-    table.add_table_dialogue((self.scratch.name, speak_dict["object"], speak_dict["volume"], speak_dict["line"], self.scratch.curr_time, set([self.scratch.name, speak_dict["object"]])))
+    table.add_table_dialogue((
+      self.scratch.name,
+      speak_dict["object"],
+      speak_dict["volume"],
+      speak_dict["expression"],
+      speak_dict["action"],
+      speak_dict["line"],
+      self.scratch.curr_time,
+      set([self.scratch.name, speak_dict["object"]]),
+    ))
     self.remember_own_dialogue(table, table.dialogue_history[-1])
     if consume_cooldown and ENABLE_SPEAKING_COOLDOWN:
       self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, 1)
@@ -754,6 +768,8 @@ class Persona:
       "response": "no reveal",
       "object": bishop.scratch.name,
       "volume": "calm",
+      "expression": "unimpressed",
+      "action": "does nothing",
       "line": "Wrong, but I am not handing you proof for free.",
     }
     response_dict = prompt_dict(
@@ -769,11 +785,20 @@ class Persona:
     obj = response_dict.get("object", "everyone")
     if obj not in table.personas and obj != "everyone":
       obj = "everyone"
-    volume = response_dict.get("volume", "calm")
-    if volume not in {"whisper", "calm", "loud", "practically screaming"}:
-      volume = "calm"
-    line = response_dict.get("line", "That guess is wrong.")
-    table.add_table_dialogue((self.scratch.name, obj, volume, line, self.scratch.curr_time, set([self.scratch.name, obj])))
+    response_dict["object"] = obj
+    response_dict = self.normalize_speech_dict(table, response_dict)
+    volume = response_dict["volume"]
+    line = response_dict["line"]
+    table.add_table_dialogue((
+      self.scratch.name,
+      obj,
+      volume,
+      response_dict["expression"],
+      response_dict["action"],
+      line,
+      self.scratch.curr_time,
+      set([self.scratch.name, obj]),
+    ))
     self.remember_own_dialogue(table, table.dialogue_history[-1])
     if ENABLE_SPEAKING_COOLDOWN:
       self.scratch.speaking_cooldown = max(self.scratch.speaking_cooldown, 1)
@@ -1029,6 +1054,8 @@ class Persona:
       run_gpt_prompt_spinster_endgame_guess(self, table),
       {
         "reasoning": "I must make my final guesses from incomplete evidence.",
+        "expression": "focused",
+        "action": "surveys the table",
         "line": "The timers are gone; now my guesses decide whether this table's endings turn inside out.",
         "guesses": fallback_guesses
       }
@@ -1046,7 +1073,18 @@ class Persona:
     line = str(guess_dict.get("line") or "The timers are gone; now my guesses decide whether this table's endings turn inside out.").strip()
     if not line:
       line = "The timers are gone; now my guesses decide whether this table's endings turn inside out."
-    table.add_table_dialogue((self.scratch.name, "everyone", "calm", line, self.scratch.curr_time, set([self.scratch.name] + target_names)))
+    expression = normalize_dialogue_expression(guess_dict.get("expression"))
+    action = normalize_dialogue_action(guess_dict.get("action"))
+    table.add_table_dialogue((
+      self.scratch.name,
+      "everyone",
+      "calm",
+      expression,
+      action,
+      line,
+      self.scratch.curr_time,
+      set([self.scratch.name] + target_names),
+    ))
     self.remember_own_dialogue(table, table.dialogue_history[-1])
 
     self.scratch.endgame_role_guesses = guesses
@@ -1633,6 +1671,14 @@ class Persona:
     personal_context_msg = self.scratch.get_str_iss()
     for relationship_name, relationship in self.scratch.relationships.items():
       personal_context_msg += f"Your relationship with {relationship_name}: {relationship}\n"
+      game_specific_context = str(
+        self.scratch.game_specific_relationship_contexts.get(relationship_name, "") or ""
+      ).strip()
+      if game_specific_context:
+        personal_context_msg += (
+          f"Additional relationship context with {relationship_name} for THIS GAME ONLY: "
+          f"{game_specific_context}\n"
+        )
     self.scratch.nun_protected = has_nun_protection(self)
     nun_protection_status = " You are currently protected by the Nun card.\n" if self.scratch.nun_protected else "\n"
     personal_context_msg += f"You are currently at the {table_information}. Your private assigned role is {your_role}, which means your family is {your_family}.\nYour ability is: {your_ability}\nYour win condition is: {your_win_condition}\n{own_card_status} You are currently holding {len(other_cards)} other players' role card(s): {other_cards_text}.{nun_protection_status}"
