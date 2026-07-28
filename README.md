@@ -178,8 +178,6 @@ three_estates_sim/
 └── sessions/                         # Local generated state; ignored by Git
 ```
 
-`three_estates_sim_simple/` is a reduced-memory experimental fork. It removes semantic RAG retrieval and most persistent event/chat memory while retaining a smaller reflection mechanism. See its own README for details.
-
 ## Design Notes
 
 - The simulation is intentionally **agent-centric**, not omniscient. Memory records reflect what a character could actually perceive.
