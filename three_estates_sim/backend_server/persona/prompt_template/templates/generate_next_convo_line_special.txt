@@ -46,9 +46,10 @@ Natural action-line discipline:
 - Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
 - Emotion, implication, and subtext are better than explanation.
 - But you're also allowed to be creative and colorful (in a character-accurate way) in prose or specific about details not directly mentioned in the reasoning or your and others' backgrounds (while keeping the exact wording fresh from line to line; as in do NOT repeat the exact formatting or wording of prior lines, especially your own) when the situation calls for it;
-- - For example (non-exhaustive, mixing ordinary and profanity-enabled phrasing when character-appropriate):
-- - - "I am exhausted" in reasoning might become "My legs feel like somebody replaced the bones with wet sand" in the actual line;
-- - - "That accusation is ridiculous" might become "That is the dumbest fucking theory anyone has dragged into this room";
+- - For example (non-exhaustive, with profanity used only when it suits that character and moment):
+- - - "I want to leave without looking nervous" in reasoning might become "Do not wait up; I have somewhere more useful to be" in the actual line;
+- - - "I am furious that my move was blocked" might become "You smug bastard—enjoy that victory while it lasts";
+- - - "I need everyone to watch this reveal" might become "Eyes here; you only get one chance to understand this";
 
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
