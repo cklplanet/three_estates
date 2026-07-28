@@ -30,15 +30,50 @@ Characters begin at the Castle, Forest, Village, and—under the expanded rulese
 
 Each main table has its own deadline. Once a table's timer expires, its occupants are locked in place. The agents must balance conversation, information gathering, deception, movement, and role-specific objectives before the game ends.
 
-The base game includes ten roles:
+## What the Game Is Designed to Explore
 
-| Family | Roles |
-| --- | --- |
-| Nobility | King, Queen, Baron |
-| Clergy | Bishop, Priest, Nun |
-| Commoners | Spinster, Farmer, Thief, Innkeeper |
+Three Estates is not built around two permanent teams or a single shared victory condition. Every character has an independently evaluated objective, and those objectives overlap only partially. The resulting game is meant to produce:
 
-The 16-player mode introduces duplicate roles and an additional Wilderness table while retaining independently evaluated win conditions.
+- **Temporary alliances:** characters can coordinate movement, exchange information, protect one another, or help assemble a mutually favorable final table.
+- **Cross-family cooperation:** sharing a family does not guarantee compatible objectives, while characters from different families may benefit from working together.
+- **Negotiation and bargaining:** a character may trade truthful information, promises, protection, card access, or help with positioning.
+- **Deception and betrayal:** soft claims, selective truths, false alliances, and last-minute departures can all be rational when objectives diverge.
+- **Information asymmetry:** conversations are local to tables, remote speech is only partially audible, and memories reflect what each character personally perceived.
+- **Changing incentives:** stolen or transferred cards, role swaps, timer lockdowns, and revealed information can alter which alliances remain useful.
+
+The role families—Nobility, Clergy, and Commoners—organize abilities and some deductions, but they are not fixed teams. A player wins or loses according to their current individual role at the end of the game.
+
+## Roles, Abilities, and Win Conditions
+
+The 10-player base game contains exactly one of each role. A player's **role**, **family**, and **win condition** are distinct from the physical location of their role card. Losing a card can prevent a reveal or ability without changing who that player currently is; a successful Thief swap is the principal way roles and win conditions themselves change hands.
+
+| Role | Family | Ability | Win condition |
+| --- | --- | --- | --- |
+| **King** | Nobility | While seated, chooses a family currently represented at the table. Players of that family who were already seated cannot leave until the King or another unaffected player leaves. The King can still depart when locking Nobility, but doing so breaks the lock. | Wins if no more than one Commoner is in the Castle. |
+| **Queen** | Nobility | When leaving, may choose another player who must follow to the same destination. That player remains locked there until the Queen or another player leaves. Immunities and stronger locks can prevent the drag. | Wins either in the Castle without a seated King or in the Village with at least one seated Priest. Loose King or Priest cards do not count as those roles being present. |
+| **Baron** | Nobility | When another player reveals their own role card at a table of at least three people, may reveal as Baron, block an associated ability, and steal the revealed card. A merely voluntary reveal remains public even if its card is stolen. The Baron gains neither the stolen role nor its ability. | Wins while holding at least three cards other than the Baron's own card, including willingly granted Nun cards. |
+| **Bishop** | Clergy | After another player leaves, may guess the family of a remaining player. A correct guess forces that target to leave; an incorrect guess lets the target decide how much, if anything, to reveal in response. | Wins if no Nobles are seated at the Bishop's final table. |
+| **Priest** | Clergy | When alone with exactly one other player, may inspect that player's role. The attempt fails if the target no longer possesses their own role card. | Wins if no more than one person is in the Forest. |
+| **Nun** | Clergy | When alone with exactly one other player, may give that player the Nun card. Its holder is protected from most hostile abilities until the card is returned, and must return a Nun's own card when that Nun requests it. | Wins if at least three Commoners win. |
+| **Spinster** | Commoners | When leaving the Forest, may mark one player remaining there. After the Spinster departs, that player must reveal their role to everyone else still in the Forest. | At game end, guesses every other role at the Spinster's final table. If every guess is correct, the win/loss results of all other players at that table are reversed. |
+| **Farmer** | Commoners | Immune to most other role abilities. Exceptions include receiving Nun protection, direct reveals caused by Priest or Spinster, and the Spinster's endgame reversal. The Farmer may reveal the Farmer card when proof of immunity is required. | Wins if seated with at least two Clergy members. |
+| **Thief** | Commoners | When alone with exactly one other player, may swap roles and win conditions with that player. A Thief cannot swap with someone who lacks their own role card, cannot target another Thief, and cannot immediately reverse the same one-on-one swap before the table state changes. | Wins if every non-Thief in the Village loses, or if no such player exists. |
+| **Innkeeper** | Commoners | Upon entering the Village from another table, may reveal and declare as Innkeeper. If activated, nobody can leave the Village until the Innkeeper leaves or another player enters. Merely starting in or remaining in the Village does not activate it. | Wins if seated with at least two Nobles. |
+
+### Expanded 16-player rules
+
+The expanded mode adds the Wilderness as a fourth table and uses this role distribution:
+
+| Role | Count | Expanded-mode change |
+| --- | ---: | --- |
+| King, Queen, Spinster, Bishop, Innkeeper | 1 each | Same ability and threshold as the base game |
+| Priest | 2 | Same ability and win condition |
+| Nun | 2 | Protection can stack; a holder remains protected while retaining at least one granted Nun card. Each Nun wins if at least five Commoners win. |
+| Farmer | 3 | Each Farmer requires at least three Clergy members at the final table. |
+| Thief | 2 | Thieves remain immune to Thief swaps. |
+| Baron | 2 | A Baron may block another eligible Baron and steal that Baron's accumulated trophy cards, but never the other Baron's own Baron card. Each Baron requires at least four trophy cards to win. |
+
+No win condition directly names the Wilderness. Its purpose is to create additional routing, negotiation, and temporary-alliance possibilities before the main tables close.
 
 ## Requirements
 
