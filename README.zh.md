@@ -1,6 +1,6 @@
 # Three Estates
 
-**简体中文** | [English](README.en.md)
+**简体中文** | [English](README.md)
 
 Three Estates 是一款由终端驱动的社交推理模拟器。由 LLM 驱动的角色会在不同桌位之间移动、交谈、展示信息、使用角色能力、形成长期记忆，并分别追求自己的胜利条件。
 

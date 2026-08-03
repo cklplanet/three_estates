@@ -1,6 +1,6 @@
 # Three Estates
 
-[简体中文](README.md) | **English**
+[简体中文](README.zh.md) | **English**
 
 Three Estates is a terminal-driven social-deduction simulator in which LLM-powered characters move between tables, converse, reveal information, use role abilities, form memories, and pursue individual win conditions.
 
