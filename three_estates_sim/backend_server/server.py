@@ -5,6 +5,8 @@ from persona.cognitive_modules.plan import *
 from persona.cognitive_modules.perceive import unpack_dialogue, generate_poig_score
 from persona.prompt_template.run_gpt_prompt import (
     run_gpt_prompt_assign_immersion_roles,
+    run_gpt_prompt_generate_character,
+    run_gpt_prompt_generate_character_names,
     run_gpt_prompt_generate_clothing,
     run_gpt_prompt_generate_game_summary_and_vn_epilogue,
     run_gpt_prompt_generate_innate_appearance,
@@ -23,6 +25,8 @@ import uuid
 import zipfile
 from collections import Counter
 from paths import FRONTEND_SERVER_ROOT
+from localization import ACTIVE_LOCALE, display_name, tr
+from character_generation import normalize_character_name_roster
 
 
 folder_mem_saved = FRONTEND_SERVER_ROOT / "memory"
@@ -39,22 +43,25 @@ PHASE_CHECKPOINT_DIRS = {
 PHASE_SNAPSHOT_ROOT = "phase_snapshots"
 TABLE_ACTIVITY_MOVEMENT_COOLDOWN_DECREMENT = 0.5
 NON_PERSONA_SESSION_DIRS = {"dialogue_logs", PHASE_SNAPSHOT_ROOT}
-NEW_SESSION_ALIASES = {"new", "n", "start new", "restart", "fresh"}
-CONTINUE_SESSION_ALIASES = {"continue", "c", "resume", "r", "load"}
-REUSE_CAST_SAME_ROLES_ALIASES = {"same roles", "same", "reuse roles", "reuse same", "cast roles", "2"}
-REUSE_CAST_REROLL_ROLES_ALIASES = {"reroll roles", "reroll", "reassign roles", "reuse reroll", "cast reroll", "3"}
-REUSE_EXACT_SETUP_ALIASES = {"exact setup", "exact", "same setup", "same tables", "reuse exact", "4"}
-CHARACTER_GENERATION_NORMAL_ALIASES = {"normal", "n", "role first", "role-first", "standard", "1"}
-CHARACTER_GENERATION_IMMERSION_ALIASES = {"immersion", "immersive", "temperament", "fit", "character first", "character-first", "2"}
-CASUAL_CONVERSATION_ALIASES = {"casual", "c", "social", "chat"}
+NEW_SESSION_ALIASES = {"new", "n", "start new", "restart", "fresh", "新建", "全新", "重新开始"}
+CONTINUE_SESSION_ALIASES = {"continue", "c", "resume", "r", "load", "继续", "恢复", "载入"}
+REUSE_CAST_SAME_ROLES_ALIASES = {"same roles", "same", "reuse roles", "reuse same", "cast roles", "2", "相同角色", "保留角色"}
+REUSE_CAST_REROLL_ROLES_ALIASES = {"reroll roles", "reroll", "reassign roles", "reuse reroll", "cast reroll", "3", "重抽角色", "重分角色"}
+REUSE_EXACT_SETUP_ALIASES = {"exact setup", "exact", "same setup", "same tables", "reuse exact", "4", "完全相同", "相同配置"}
+CHARACTER_GENERATION_NORMAL_ALIASES = {"normal", "n", "role first", "role-first", "standard", "1", "普通", "标准"}
+CHARACTER_GENERATION_IMMERSION_ALIASES = {"immersion", "immersive", "temperament", "fit", "character first", "character-first", "2", "沉浸", "性格优先"}
+CASUAL_CONVERSATION_ALIASES = {"casual", "c", "social", "chat", "休闲"}
 ULTRA_CASUAL_CONVERSATION_ALIASES = {
     "ultra casual",
     "ultra-casual",
     "ultracasual",
     "ultra",
     "uc",
+    "超休闲",
 }
-STRATEGIC_CONVERSATION_ALIASES = {"strategic", "s", "game", "deduction"}
+STRATEGIC_CONVERSATION_ALIASES = {"strategic", "s", "game", "deduction", "策略", "战略"}
+YES_ALIASES = {"yes", "y", "是", "要", "需要"}
+NO_ALIASES = {"no", "n", "否", "不", "不要", "不需要"}
 
 
 def write_json_atomic(path, payload):
@@ -64,8 +71,8 @@ def write_json_atomic(path, payload):
         f".{os.path.basename(path)}.{uuid.uuid4().hex}.tmp",
     )
     try:
-        with open(tmp_path, "w") as outfile:
-            json.dump(payload, outfile, indent=2)
+        with open(tmp_path, "w", encoding="utf-8") as outfile:
+            json.dump(payload, outfile, indent=2, ensure_ascii=False)
             outfile.flush()
             os.fsync(outfile.fileno())
         os.replace(tmp_path, path)
@@ -84,7 +91,6 @@ class ThreeEstatesServer:
         self.sec_per_step = SIM_SECONDS_PER_STEP
         self.casual_sec_per_step = CASUAL_SECONDS_PER_PHASE
         self.curr_time = datetime.timedelta(0)
-        self.server_sleep = SERVER_SLEEP_SECONDS
         self.session_id = None
         self.dialogue_log_path = None
         self.clean_dialogue_log_path = None
@@ -121,11 +127,7 @@ class ThreeEstatesServer:
 
     def choose_conversation_mode(self):
         while True:
-            choice = input(
-                "Choose conversational mode for this run: 'casual' prioritizes ordinary character conversation until three quarters of the earliest-expiring table timer has elapsed; "
-                "'ultra casual' keeps that casual posture and casual phase timing throughout the entire game; "
-                "'strategic' keeps conversation centered on the social-deduction game.\n"
-            ).strip().lower()
+            choice = input(tr("terminal.choose_conversation_mode")).strip().lower()
             if choice in ULTRA_CASUAL_CONVERSATION_ALIASES:
                 self.set_conversation_mode("ultra_casual")
                 return "ultra_casual"
@@ -135,7 +137,7 @@ class ThreeEstatesServer:
             if choice in STRATEGIC_CONVERSATION_ALIASES:
                 self.set_conversation_mode("strategic")
                 return "strategic"
-            print("Please type 'ultra casual', 'casual', or 'strategic'.")
+            print(tr("terminal.invalid_conversation_mode"))
 
     def choose_starting_table_assignments(self):
         preferred_order = ["Castle", "Forest", "Village", "Wilderness"]
@@ -152,17 +154,15 @@ class ThreeEstatesServer:
         if not table_names:
             raise ValueError("No starting tables are configured.")
         while True:
-            choice = input(
-                "Do you want to manually assign the starting seats? yes or no\n"
-            ).strip().lower()
-            if choice in {"no", "n"}:
+            choice = input(tr("terminal.choose_manual_seating")).strip().lower()
+            if choice in NO_ALIASES:
                 return {
                     name: random.choice(table_names)
                     for name in self.personas
                 }
-            if choice in {"yes", "y"}:
+            if choice in YES_ALIASES:
                 break
-            print("Please type 'yes' or 'no'.")
+            print(tr("terminal.invalid_yes_no"))
 
         numbered_tables = {
             str(index): name
@@ -170,42 +170,41 @@ class ThreeEstatesServer:
         }
         canonical_tables = {
             **{name.casefold(): name for name in table_names},
+            **{display_name("table", name).casefold(): name for name in table_names},
             **numbered_tables,
         }
-        table_menu = ", ".join(
-            f"{index} {name}"
-            for index, name in enumerate(table_names, start=1)
-        )
+        table_labels = []
+        for index, name in enumerate(table_names, start=1):
+            localized_name = display_name("table", name)
+            bilingual_name = (
+                f"{localized_name} ({name})"
+                if localized_name != name
+                else name
+            )
+            table_labels.append(f"{index} {bilingual_name}")
+        table_menu = ", ".join(table_labels)
         assignments = {}
-        print(f"Available starting tables: {table_menu}")
+        print(tr("terminal.available_tables", tables=table_menu))
         for name in self.personas:
             while True:
-                choice = input(
-                    f"Starting table for {name} ({table_menu}); enter its number or name:\n"
-                ).strip()
+                choice = input(tr("terminal.choose_character_table", name=name, tables=table_menu)).strip()
                 starting_table = canonical_tables.get(choice.casefold())
                 if starting_table:
                     assignments[name] = starting_table
                     break
-                print(f"Please enter one of: {table_menu}.")
+                print(tr("terminal.invalid_table", tables=table_menu))
         return assignments
 
     def choose_reuse_context_mode(self):
         while True:
-            choice = input(
-                "Choose context handling for this new game:\n"
-                "- 'keep': keep the saved ongoing scenario context, clothing, full relationship records, and game-only relationship additions as they currently are.\n"
-                "- 'fresh': start from permanent initial context and base relationships, then enter replacement game-only scenario context, choose clothing handling, and enter fresh shared, A-to-B, and B-to-A game-only relationship context.\n"
-                "- 'base': use only permanent initial context and base relationships, omit clothing, and use no temporary additions.\n"
-                "Previous-game summaries remain archived but are excluded from all three modes.\n"
-            ).strip().lower()
-            if choice in {"keep", "k", "same", "1"}:
+            choice = input(tr("terminal.choose_context_mode")).strip().lower()
+            if choice in {"keep", "k", "same", "1", "保留", "原样"}:
                 return "keep"
-            if choice in {"fresh", "f", "new", "2"}:
+            if choice in {"fresh", "f", "new", "2", "刷新", "替换"}:
                 return "fresh"
-            if choice in {"base", "b", "initial", "3"}:
+            if choice in {"base", "b", "initial", "3", "基础", "初始"}:
                 return "base"
-            print("Please type 'keep', 'fresh', or 'base'.")
+            print(tr("terminal.invalid_context_mode"))
 
     def sync_endgame_mode(self):
         locked_count = sum(
@@ -328,11 +327,18 @@ class ThreeEstatesServer:
         for previous_benefactor, role in previous_benefactors:
             if previous_benefactor in self.personas:
                 self.refresh_lock_holder_state(previous_benefactor, role)
-            family_note = ""
-            if role == "King":
-                family_text = ", ".join(sorted(cleared_lock_families.get((previous_benefactor, role), {"the targeted family"})))
-                family_note = f" against {family_text}"
-            act_desp = f"{previous_benefactor}'s lockdown ability as {role}{family_note} is nullified by {breaker_name} {trigger}ing"
+            families = sorted(cleared_lock_families.get((previous_benefactor, role), set()))
+            family_text = ", ".join(
+                display_name("family", family) for family in families
+            ) or tr("event.targeted_family")
+            act_desp = tr(
+                "event.lock.nullified",
+                holder=previous_benefactor,
+                role=display_name("role", role),
+                family=family_text,
+                breaker=breaker_name,
+                trigger=tr(f"event.trigger.{trigger}"),
+            )
             matching_locks = {
                 lock for lock in cleared_locks
                 if lock[0] == previous_benefactor and lock[2] == role
@@ -509,10 +515,12 @@ class ThreeEstatesServer:
                 continue
             if table.timer_expired:
                 benefactor_name = removal_target[0]
-                act_desp = (
-                    f"{target_name} cannot leave or be forced out by "
-                    f"{benefactor_name or 'another player'}'s {action_role} ability because "
-                    f"the {table.name} timer lockdown is final."
+                act_desp = tr(
+                    "event.movement.blocked_by_timer",
+                    target=target_name,
+                    benefactor=benefactor_name or tr("event.another_player"),
+                    role=display_name("role", action_role),
+                    table=display_name("table", table.name),
                 )
                 table.add_table_event(
                     (
@@ -594,9 +602,11 @@ class ThreeEstatesServer:
         obj = "her" if exiled_persona.scratch.gender == "female" else "him"
 
         if role == "Queen":
-            ability_attempt_context = (
-                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Queen')} and attempts to use "
-                f"{poss} Queen ability on {target_name} while being exiled by Bishop {bishop_name}."
+            ability_attempt_context = tr(
+                "event.queen.exile_attempt",
+                queen=exiled_persona.scratch.name,
+                target=target_name,
+                bishop=bishop_name,
             )
             exiled_persona.speak(
                 table,
@@ -631,9 +641,11 @@ class ThreeEstatesServer:
                 "(For this occasion, the Queen ability has succeeded; do not claim or imply that this current drag was nullified just because an earlier Queen lock or drag was broken)",
                 consume_cooldown=False,
             )
-            event_msg = (
-                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Queen')} while being exiled "
-                f"and drags {target_name} to {destination} with {obj} using {poss} ability."
+            event_msg = tr(
+                "event.queen.exile_drag",
+                queen=exiled_persona.scratch.name,
+                target=target_name,
+                destination=display_name("table", destination),
             )
             table.add_table_event((exiled_persona.scratch.name, target_name, event_msg, self.curr_time, set([exiled_persona.scratch.name, target_name, bishop_name])))
             self.clear_table_locks(table, target_name, "leave")
@@ -644,9 +656,12 @@ class ThreeEstatesServer:
             return {}
 
         if role == "Spinster":
-            ability_attempt_context = (
-                f"{exiled_persona.scratch.name} reveals {exiled_persona.role_card_text(role='Spinster')} and attempts to use "
-                f"{poss} Spinster ability on {target_name} while being exiled by Bishop {bishop_name} to {destination}."
+            ability_attempt_context = tr(
+                "event.spinster.exile_attempt",
+                spinster=exiled_persona.scratch.name,
+                target=target_name,
+                bishop=bishop_name,
+                destination=display_name("table", destination),
             )
             exiled_persona.speak(
                 table,
@@ -663,10 +678,9 @@ class ThreeEstatesServer:
         if table.timer_expired or self.curr_time <= TIMERS[table.name]:
             return
         table.timer_expired = True
-        act_desp = (
-            f"The {table.name} timer expires; {table.name} is now under final timer lockdown. "
-            "Nobody seated there can leave by normal movement or be moved out by any voluntary or forced role ability, "
-            "though players may still enter."
+        act_desp = tr(
+            "event.timer.expired",
+            table=display_name("table", table.name),
         )
         timer_event = ("system", None, act_desp, self.curr_time, set([table.name] + list(table.personas.keys())))
         table.add_table_event(timer_event)
@@ -879,7 +893,7 @@ class ThreeEstatesServer:
                         f"top_score={top_score} | threshold={MIN_ACTION_BID_SCORE} | "
                         f"ranking={final_table_results}"
                     )
-                act_desp = "The table falls quiet; no action bid is strong enough for anyone to act."
+                act_desp = tr("event.table.no_action")
                 table.add_table_event(("system", None, act_desp, self.curr_time, set(table.personas.keys())))
             else:
                 top_candidates = [name for name, pts in final_table_results if abs(pts - top_score) <= EPS]
@@ -1054,7 +1068,11 @@ class ThreeEstatesServer:
             table.personas[candidate] = arriving_persona
             self.room.transit.pop(candidate, None)
             self.clear_thief_swap_locks(table, "arrival", trigger_name=None)
-            act_desp = f"{candidate} arrives from {source_table}"
+            act_desp = tr(
+                "event.movement.arrival",
+                character=candidate,
+                source=display_name("table", source_table),
+            )
             arrival_event = (candidate, None, act_desp, self.personas[candidate].scratch.curr_time, set([candidate]))
             table.add_table_event(arrival_event)
             self.decrement_table_movement_cooldowns(
@@ -1137,9 +1155,10 @@ class ThreeEstatesServer:
             )
             innkeeper.speak(table, special_circumstance=innkeeper_announcement, consume_cooldown=False)
 
-            ability_attempt_context = (
-                f"{innkeeper.scratch.name} reveals {innkeeper.role_card_text(role='Innkeeper')} and attempts to declare "
-                "themself as Innkeeper to lock down everyone at the Village."
+            ability_attempt_context = tr(
+                "event.innkeeper.attempt",
+                innkeeper=innkeeper.scratch.name,
+                village=display_name("table", "Village"),
             )
             table.add_table_event((innkeeper.scratch.name, None, ability_attempt_context, self.curr_time, set([innkeeper.scratch.name])))
             if innkeeper.resolve_baron_reaction(table, innkeeper.scratch.name, ability_attempt_context, block_ability=True):
@@ -1149,7 +1168,11 @@ class ThreeEstatesServer:
                 if other_player_name != innkeeper.scratch.name:
                     self.add_lock_if_allowed(table, innkeeper.scratch.name, other_player_name, innkeeper.scratch.role)
 
-            act_desp = f"{innkeeper.scratch.name} reveals {innkeeper.role_card_text(role='Innkeeper')}, declares themself as Innkeeper, and locks down everyone at the Village"
+            act_desp = tr(
+                "event.innkeeper.lock",
+                innkeeper=innkeeper.scratch.name,
+                village=display_name("table", "Village"),
+            )
             lockdown_event = (innkeeper.scratch.name, None, act_desp, self.curr_time, set([innkeeper.scratch.name] + innkeeper.scratch.ability_objects))
             table.add_table_event(lockdown_event)
 
@@ -1251,7 +1274,7 @@ class ThreeEstatesServer:
             archive_path = f"{save_file}_archived_{timestamp}_{counter}"
             counter += 1
         shutil.move(save_file, archive_path)
-        print(f"Archived previous session to: {archive_path}")
+        print(tr("terminal.archived_session", path=archive_path))
         return archive_path
 
     def choose_session_mode(self):
@@ -1269,25 +1292,26 @@ class ThreeEstatesServer:
             setup_stage and setup_stage != "complete" and not has_checkpoint
         )
         if has_checkpoint:
-            checkpoint_note = "saved game state"
+            checkpoint_note = tr("terminal.checkpoint.saved_game")
         elif has_incomplete_new_cast_setup:
-            checkpoint_note = f"interrupted new-cast setup at '{setup_stage}'"
+            checkpoint_note = tr(
+                "terminal.checkpoint.interrupted_cast",
+                stage=setup_stage,
+            )
         else:
-            checkpoint_note = "saved character memories only"
+            checkpoint_note = tr("terminal.checkpoint.memories_only")
         while True:
-            choice = input(
-                f"Existing session data found in {save_file} ({checkpoint_note}). "
-                "Choose one:\n"
-                + (
-                    "- 'continue' to resume the interrupted new-cast setup\n"
-                    if has_incomplete_new_cast_setup
-                    else "- 'continue' to load the saved run\n"
-                )
-                + "- 'new' to archive everything and generate a fully new cast\n"
-                + "- 'same roles' to reuse these characters, roles, and established relationships, but wipe game state/memory/logs\n"
-                + "- 'reroll roles' to reuse these characters and established relationships with reassigned roles, wiping game state/memory/logs\n"
-                + "- 'exact setup' to reuse these characters, roles, established relationships, starting tables, and starting movement cooldowns while wiping game state/memory/logs\n"
-            ).strip().lower()
+            continue_option = tr(
+                "terminal.continue_setup"
+                if has_incomplete_new_cast_setup
+                else "terminal.continue_run"
+            )
+            choice = input(tr(
+                "terminal.session_found",
+                path=save_file,
+                note=checkpoint_note,
+                continue_option=continue_option,
+            )).strip().lower()
             if choice in CONTINUE_SESSION_ALIASES:
                 if has_incomplete_new_cast_setup:
                     return "resume_generation"
@@ -1302,7 +1326,7 @@ class ThreeEstatesServer:
                 return "reuse_reroll_roles"
             if choice in REUSE_EXACT_SETUP_ALIASES:
                 return "reuse_exact_setup"
-            print("Please type 'continue', 'new', 'same roles', 'reroll roles', or 'exact setup'.")
+            print(tr("terminal.invalid_session_mode"))
 
     def metadata_payload(self):
         return {
@@ -1313,6 +1337,7 @@ class ThreeEstatesServer:
             "debug_log_path": str(self.debug_log_path) if self.debug_log_path else None,
             "game_mode": self.game_mode,
             "conversation_mode": self.conversation_mode,
+            "locale": ACTIVE_LOCALE,
             "exact_setup_movement_cooldowns": self.exact_setup_movement_cooldowns,
             "exact_setup_starting_tables": self.exact_setup_starting_tables,
         }
@@ -1328,8 +1353,8 @@ class ThreeEstatesServer:
             "created_at": existing.get("created_at", datetime.datetime.now().isoformat(timespec="seconds")),
             **self.metadata_payload(),
         }
-        with open(metadata_path, "w") as outfile:
-            json.dump(payload, outfile, indent=2)
+        with open(metadata_path, "w", encoding="utf-8") as outfile:
+            json.dump(payload, outfile, indent=2, ensure_ascii=False)
 
     def load_session_metadata(self):
         metadata_path = self.session_metadata_path()
@@ -1467,8 +1492,8 @@ class ThreeEstatesServer:
                 f".{os.path.basename(path)}.{uuid.uuid4().hex}.tmp",
             )
             try:
-                with open(tmp_path, "w") as outfile:
-                    json.dump(payload, outfile, indent=2)
+                with open(tmp_path, "w", encoding="utf-8") as outfile:
+                    json.dump(payload, outfile, indent=2, ensure_ascii=False)
                     outfile.flush()
                     os.fsync(outfile.fileno())
                 os.replace(tmp_path, path)
@@ -1593,7 +1618,7 @@ class ThreeEstatesServer:
                 else:
                     print(warning)
         self.save_session_metadata()
-        print(f"Saved game checkpoint ({reason}) to: {state_path}")
+        print(tr("terminal.saved_checkpoint", reason=reason, path=state_path))
 
     def save_personas_only(self, reason):
         os.makedirs(save_file, exist_ok=True)
@@ -1602,7 +1627,7 @@ class ThreeEstatesServer:
         for persona in self.personas.values():
             persona.save(os.path.join(save_file, persona.scratch.name))
         self.save_session_metadata()
-        print(f"Saved character memories ({reason}) to: {save_file}")
+        print(tr("terminal.saved_memories", reason=reason, path=save_file))
 
     def load_checkpoint(self):
         with open(self.session_state_path()) as infile:
@@ -1637,16 +1662,16 @@ class ThreeEstatesServer:
             persona.scratch.curr_time = self.curr_time
             persona.rebuild_recent_conversation_from_memory()
         self.sync_endgame_mode()
-        print(f"Loaded checkpoint from: {self.session_state_path()}")
+        print(tr("terminal.loaded_checkpoint", path=self.session_state_path()))
 
     def should_start_game_after_generation(self):
         while True:
-            choice = input("Characters and their starting relationships are generated. Type 'start' to begin this game now, or 'quit' to save the prepared cast and stop here:\n").strip().lower()
-            if choice in {"start", "s", "yes", "y", "continue", "c"}:
+            choice = input(tr("terminal.generated_start_or_quit")).strip().lower()
+            if choice in {"start", "s", "yes", "y", "continue", "c", "开始", "继续", "是"}:
                 return True
-            if choice in {"quit", "q", "no", "n", "stop"}:
+            if choice in {"quit", "q", "no", "n", "stop", "退出", "停止", "否"}:
                 return False
-            print("Please type 'start' or 'quit'.")
+            print(tr("terminal.invalid_start_or_quit"))
 
     def choose_game_mode_for_new_cast(self):
         env_mode = os.getenv("THREE_ESTATES_GAME_MODE") or read_local_env_value("THREE_ESTATES_GAME_MODE")
@@ -1654,11 +1679,11 @@ class ThreeEstatesServer:
             self.configure_game_mode(env_mode)
             return
         while True:
-            choice = input("Choose game size/ruleset: type '10' for base mode or '16' for expanded mode:\n").strip()
+            choice = input(tr("terminal.choose_game_mode")).strip()
             if choice in {"10", "16"}:
                 self.configure_game_mode(choice)
                 return
-            print("Please type '10' or '16'.")
+            print(tr("terminal.invalid_game_mode"))
 
     def choose_character_generation_mode(self):
         env_mode = (
@@ -1671,52 +1696,41 @@ class ThreeEstatesServer:
         if env_mode in CHARACTER_GENERATION_NORMAL_ALIASES:
             return "normal"
         while True:
-            choice = input(
-                "Choose character generation role assignment: type 'normal' to generate one character per shuffled role, "
-                "or 'immersion' to generate the cast first and assign roles by temperament:\n"
-            ).strip().lower()
+            choice = input(tr("terminal.choose_generation_mode")).strip().lower()
             if choice in CHARACTER_GENERATION_IMMERSION_ALIASES:
                 return "immersion"
             if choice in CHARACTER_GENERATION_NORMAL_ALIASES:
                 return "normal"
-            print("Please type 'normal' or 'immersion'.")
+            print(tr("terminal.invalid_generation_mode"))
 
     def choose_reroll_role_assignment_mode(self):
         while True:
-            choice = input(
-                "Choose reroll role assignment: type 'normal' to reassign roles randomly, "
-                "or 'immersion' to reassign them by character temperament and dramatic/strategic fit:\n"
-            ).strip().lower()
+            choice = input(tr("terminal.choose_reroll_mode")).strip().lower()
             if choice in CHARACTER_GENERATION_IMMERSION_ALIASES:
                 return "immersion"
             if choice in CHARACTER_GENERATION_NORMAL_ALIASES:
                 return "normal"
-            print("Please type 'normal' or 'immersion'.")
+            print(tr("terminal.invalid_generation_mode"))
 
     def choose_appearance_factor(self):
         while True:
-            choice = input(
-                "Should innate physical appearance be a factor for this cast? yes or no\n"
-            ).strip().lower()
-            if choice in {"yes", "y"}:
+            choice = input(tr("terminal.choose_appearance")).strip().lower()
+            if choice in YES_ALIASES:
                 return True
-            if choice in {"no", "n"}:
+            if choice in NO_ALIASES:
                 return False
-            print("Please type 'yes' or 'no'.")
+            print(tr("terminal.invalid_yes_no"))
 
     def choose_clothing_factor(self):
         while True:
-            choice = input(
-                "Choose clothing handling: 'none' to omit clothing as a factor, "
-                "'automatic' to generate it, or 'custom' to enter it yourself:\n"
-            ).strip().lower()
-            if choice in {"none", "no", "n", "omit", "off", "1"}:
+            choice = input(tr("terminal.choose_clothing")).strip().lower()
+            if choice in {"none", "no", "n", "omit", "off", "1", "无", "不考虑"}:
                 return "none"
-            if choice in {"automatic", "auto", "generate", "generated", "2"}:
+            if choice in {"automatic", "auto", "generate", "generated", "2", "自动", "生成"}:
                 return "automatic"
-            if choice in {"custom", "manual", "myself", "3"}:
+            if choice in {"custom", "manual", "myself", "3", "自定义", "手动"}:
                 return "custom"
-            print("Please type 'none', 'automatic', or 'custom'.")
+            print(tr("terminal.invalid_clothing"))
 
     def generate_innate_appearance(self, persona, character_group_context):
         fallback = "ordinary features and average build"
@@ -1728,10 +1742,11 @@ class ThreeEstatesServer:
             result.get("innate_appearance", fallback),
             85,
         )
-        print(
-            f"{persona.scratch.name}, appearance: "
-            f"{persona.scratch.innate_appearance}"
-        )
+        print(tr(
+            "terminal.generated_appearance",
+            name=persona.scratch.name,
+            appearance=persona.scratch.innate_appearance,
+        ))
         if debug:
             debug_log(
                 f"[CHARACTER-APPEARANCE] character={persona.scratch.name} | "
@@ -1748,7 +1763,11 @@ class ThreeEstatesServer:
             result.get("clothing", fallback),
             80,
         )
-        print(f"{persona.scratch.name}, wearing {persona.scratch.clothing}")
+        print(tr(
+            "terminal.generated_clothing",
+            name=persona.scratch.name,
+            clothing=persona.scratch.clothing,
+        ))
         if debug:
             debug_log(
                 f"[CHARACTER-CLOTHING] character={persona.scratch.name} | "
@@ -1820,14 +1839,12 @@ class ThreeEstatesServer:
             for persona in sorted(self.personas.values(), key=lambda item: item.scratch.name):
                 if persona.scratch.name in clothing_completed:
                     continue
-                clothing = input(
-                    f"\nCharacter: {persona.scratch.name}\n"
-                    f"Profile: {persona.scratch.innate}\n"
-                    f"Innate appearance: {persona.scratch.innate_appearance}\n"
-                    f"Enter clothing under 60 characters; "
-                    "e.g. Nagito Komaeda: 'green coat over white shirt underneath and green trousers'; "
-                    "Peko Pekoyama: 'black sailor-fuku':\n"
-                )
+                clothing = input(tr(
+                    "terminal.custom_clothing",
+                    name=persona.scratch.name,
+                    profile=persona.scratch.innate,
+                    appearance=persona.scratch.innate_appearance,
+                ))
                 persona.scratch.clothing = compact_profile_field(clothing, 60)
                 clothing_completed.add(persona.scratch.name)
                 self.save_new_cast_persona_progress(
@@ -1869,21 +1886,20 @@ class ThreeEstatesServer:
                     result.get("clothing", fallback),
                     60,
                 )
-                print(
-                    f"{character.get('name', 'Unknown')}, wearing "
-                    f"{character['clothing']}"
-                )
+                print(tr(
+                    "terminal.generated_clothing",
+                    name=character.get("name", "Unknown"),
+                    clothing=character["clothing"],
+                ))
             return cast
 
         for character in cast:
-            clothing = input(
-                f"\nCharacter: {character.get('name', 'Unknown')}\n"
-                f"Profile: {character.get('innate', '')}\n"
-                f"Innate appearance: {character.get('innate_appearance', '')}\n"
-                "Enter clothing under 60 characters; "
-                "e.g. Nagito Komaeda: 'green coat over white shirt underneath and green trousers'; "
-                "Peko Pekoyama: 'black sailor-fuku':\n"
-            )
+            clothing = input(tr(
+                "terminal.custom_clothing",
+                name=character.get("name", "Unknown"),
+                profile=character.get("innate", ""),
+                appearance=character.get("innate_appearance", ""),
+            ))
             character["clothing"] = compact_profile_field(clothing, 60)
         return cast
 
@@ -1892,13 +1908,7 @@ class ThreeEstatesServer:
         character_group_context,
         character_generation_mode,
     ):
-        replacement_context = input(
-            "\nDEBUG POST-GENERATION CONTEXT OVERRIDE:\n"
-            "Enter replacement character/group context to use for appearance generation, "
-            "relationship generation, the actual game, and future reused games. "
-            "The already generated characters and personalities will not be regenerated. "
-            "Press Enter to keep the original character-generation context:\n"
-        ).strip()
+        replacement_context = input(tr("terminal.context_override")).strip()
         if not replacement_context:
             return character_group_context
         for persona in self.personas.values():
@@ -2016,41 +2026,55 @@ class ThreeEstatesServer:
         self,
         roles,
         character_group_context,
-        existing_character_names=None,
+        planned_character_names,
     ):
         setup = self.new_cast_setup_payload()
-        character_profiles = list(setup.get("immersion_character_profiles") or [])
-        existing_character_names = list(existing_character_names or [])
-        existing_character_names.extend(
+        saved_profiles = list(setup.get("immersion_character_profiles") or [])
+        profiles_by_name = {
+            profile.get("name"): profile
+            for profile in saved_profiles
+            if isinstance(profile, dict)
+            and profile.get("name") in planned_character_names
+        }
+        character_profiles = [
+            profiles_by_name[name]
+            for name in planned_character_names
+            if name in profiles_by_name
+        ]
+        profiled_names = {
             profile.get("name")
             for profile in character_profiles
-            if profile.get("name") and profile.get("name") not in existing_character_names
-        )
-        for index in range(len(character_profiles), len(roles)):
-            existing_character_choices = ""
-            if existing_character_names:
-                existing_character_choices = ",".join(existing_character_names)
+            if isinstance(profile, dict) and profile.get("name")
+        }
+        for roster_name in planned_character_names:
+            if roster_name in profiled_names:
+                continue
             character_dict = self.generate_character_profile(
                 character_group_context,
-                existing_character_choices,
-                f"Character {index + 1}",
+                roster_name,
+                planned_character_names,
             )
             character_profiles.append(character_dict)
-            existing_character_names.append(character_dict["name"])
+            profiled_names.add(roster_name)
             setup = self.update_new_cast_setup(
-                stage="generating_characters",
+                stage="generating_character_profiles",
+                planned_character_names=planned_character_names,
                 immersion_character_profiles=character_profiles,
             )
 
         role_assignments = setup.get("immersion_role_assignments")
-        if not isinstance(role_assignments, dict):
+        if (
+            not isinstance(role_assignments, dict)
+            or set(role_assignments) != set(planned_character_names)
+            or Counter(role_assignments.values()) != Counter(roles)
+        ):
             role_assignments = self.assign_roles_by_immersion(
                 character_group_context,
                 character_profiles,
                 roles,
             )
             self.update_new_cast_setup(
-                stage="generating_characters",
+                stage="assigning_immersion_roles",
                 immersion_character_profiles=character_profiles,
                 immersion_role_assignments=role_assignments,
             )
@@ -2060,8 +2084,10 @@ class ThreeEstatesServer:
             role = role_assignments[character_dict["name"]]
             self.create_persona_from_character_profile(character_dict, role, character_group_context)
             self.update_new_cast_setup(
-                stage="generating_characters",
-                generated_character_names=sorted(self.personas),
+                stage="creating_personas",
+                generated_character_names=[
+                    name for name in planned_character_names if name in self.personas
+                ],
             )
             if debug:
                 debug_log(
@@ -2083,8 +2109,11 @@ class ThreeEstatesServer:
             return False
         if target.scratch.role == "Farmer":
             special_circumstance = f"the {role} {benefactor} is trying to lock you at this table and you have to reveal you're the Farmer and immune"
-            poss = "her" if target.scratch.gender == "female" else "his"
-            act_desp = f"{target_name} reveals {poss} Farmer card"
+            act_desp = tr(
+                "event.card.reveal",
+                character=target_name,
+                role=display_name("role", "Farmer"),
+            )
             reveal_event = (target_name, None, act_desp, self.curr_time, set([target_name]))
             table.add_table_event(reveal_event)
             target.speak(table, special_circumstance)
@@ -2099,29 +2128,30 @@ class ThreeEstatesServer:
             run_gpt_prompt_generate_relationship(character_group_context, p1, p2),
             f"{p1.scratch.name} and {p2.scratch.name} know each other only casually through the game group."
         )
-        additional_base_context = input(
-            f"\nGenerated initial relationship for {p1.scratch.name} and {p2.scratch.name}:\n"
-            f"{relationship}\n\n"
-            "1/4 — Enter any additional INITIAL/BASE relationship context shared by both characters, "
-            "or press Enter for none. This becomes part of their permanent baseline for future games:\n"
-        ).strip()
+        additional_base_context = input(tr(
+            "terminal.generated_relationship",
+            first=p1.scratch.name,
+            second=p2.scratch.name,
+            relationship=relationship,
+        )).strip()
         if additional_base_context:
             relationship = f"{relationship.rstrip()}\n\n{additional_base_context}"
 
-        shared_game_context = input(
-            f"2/4 — Enter additional relationship context shared by {p1.scratch.name} and "
-            f"{p2.scratch.name} for THIS GAME ONLY, or press Enter for none:\n"
-        ).strip()
-        p1_game_context = input(
-            f"3/4 — Enter additional relationship context applying only to "
-            f"{p1.scratch.name}'s view of {p2.scratch.name} for THIS GAME ONLY, "
-            "or press Enter for none:\n"
-        ).strip()
-        p2_game_context = input(
-            f"4/4 — Enter additional relationship context applying only to "
-            f"{p2.scratch.name}'s view of {p1.scratch.name} for THIS GAME ONLY, "
-            "or press Enter for none:\n"
-        ).strip()
+        shared_game_context = input(tr(
+            "terminal.relationship_game_shared",
+            first=p1.scratch.name,
+            second=p2.scratch.name,
+        )).strip()
+        p1_game_context = input(tr(
+            "terminal.relationship_game_first",
+            first=p1.scratch.name,
+            second=p2.scratch.name,
+        )).strip()
+        p2_game_context = input(tr(
+            "terminal.relationship_game_second",
+            first=p1.scratch.name,
+            second=p2.scratch.name,
+        )).strip()
 
         def combine_game_context(shared_context, directional_context):
             return "\n\n".join(
@@ -2225,16 +2255,14 @@ class ThreeEstatesServer:
         relationship_enabled = setup.get("relationship_enabled")
         if relationship_enabled is None:
             while True:
-                relationship_flag = input(
-                    "Do you want at least some of them to know each other beforehand? yes or no\n"
-                ).strip().lower()
-                if relationship_flag in {"yes", "y"}:
+                relationship_flag = input(tr("terminal.any_relationships")).strip().lower()
+                if relationship_flag in YES_ALIASES:
                     relationship_enabled = True
                     break
-                if relationship_flag in {"no", "n"}:
+                if relationship_flag in NO_ALIASES:
                     relationship_enabled = False
                     break
-                print("Please type 'yes' or 'no'.")
+                print(tr("terminal.invalid_yes_no"))
             setup = self.update_new_cast_setup(
                 stage="relationship_choice_complete",
                 relationship_enabled=relationship_enabled,
@@ -2299,16 +2327,31 @@ class ThreeEstatesServer:
             ],
         )
 
-    def generate_character_profile(self, character_group_context, existing_character_choices, fallback_name):
-        return prompt_dict(
-            run_gpt_prompt_generate_character(character_group_context, existing_character_choices),
+    def generate_character_profile(self, character_group_context, fixed_name, full_roster):
+        character_dict = prompt_dict(
+            run_gpt_prompt_generate_character(
+                character_group_context,
+                fixed_name,
+                full_roster,
+            ),
             {
-                "name": fallback_name,
+                "name": fixed_name,
                 "gender": "unknown",
                 "age": "30",
                 "innate": "is a cautious contestant generated as a fallback for the simulation.",
             }
         )
+        # Roster selection is the sole name-resolution pass. A profile response
+        # cannot rename, translate, abbreviate, or further expand its character.
+        character_dict["name"] = fixed_name
+        character_dict["gender"] = str(
+            character_dict.get("gender") or "unknown"
+        ).strip().lower()
+        character_dict["innate"] = str(
+            character_dict.get("innate")
+            or "is a cautious contestant generated as a fallback for the simulation."
+        ).strip()
+        return character_dict
 
     def create_persona_from_character_profile(self, character_dict, role, character_group_context):
         persona_path = os.path.join(save_file, character_dict['name'])
@@ -2331,15 +2374,73 @@ class ThreeEstatesServer:
         new_persona.save(persona_path)
         return new_persona
 
-    def generate_character(self, role, character_group_context, existing_character_choices, role_label=None):
-        role_label = role_label or role
-        fallback_name = f"{role_label} Player"
-        character_dict = self.generate_character_profile(
-            character_group_context,
-            existing_character_choices,
-            fallback_name,
+    def ensure_character_name_roster(self, roles, character_group_context):
+        setup = self.new_cast_setup_payload()
+        cast_size = len(roles)
+        planned_names = setup.get("planned_character_names")
+        if isinstance(planned_names, list) and len(planned_names) == cast_size:
+            normalized_names = normalize_character_name_roster(
+                planned_names,
+                cast_size,
+            )
+            if normalized_names == planned_names:
+                return planned_names
+
+        # Preserve names already committed by an older interrupted generation.
+        committed_candidates = list(setup.get("generated_character_names") or [])
+        committed_candidates.extend(
+            profile.get("name")
+            for profile in (setup.get("immersion_character_profiles") or [])
+            if isinstance(profile, dict) and profile.get("name")
         )
-        return self.create_persona_from_character_profile(character_dict, role, character_group_context)
+        committed_candidates.extend(self.personas.keys())
+        committed_names = []
+        committed_identities = set()
+        for raw_name in committed_candidates:
+            name = str(raw_name or "").strip()
+            identity = name.casefold()
+            if not name or identity in committed_identities:
+                continue
+            committed_names.append(name)
+            committed_identities.add(identity)
+            if len(committed_names) >= cast_size:
+                break
+
+        if len(committed_names) == cast_size:
+            self.update_new_cast_setup(
+                stage="character_names_generated",
+                planned_character_names=committed_names,
+            )
+            print(tr(
+                "terminal.character_roster",
+                names=", ".join(committed_names),
+            ))
+            return committed_names
+
+        name_result = prompt_dict(
+            run_gpt_prompt_generate_character_names(
+                character_group_context,
+                cast_size,
+                existing_names=committed_names,
+            ),
+            {"names": []},
+        )
+        planned_names = normalize_character_name_roster(
+            name_result.get("names", []),
+            cast_size,
+            committed_names=committed_names,
+        )
+        self.update_new_cast_setup(
+            stage="character_names_generated",
+            planned_character_names=planned_names,
+        )
+        print(tr(
+            "terminal.character_roster",
+            names=", ".join(planned_names),
+        ))
+        if debug:
+            debug_log(f"[CHARACTER-ROSTER] names={planned_names}")
+        return planned_names
 
     def complete_new_cast_character_generation(
         self,
@@ -2347,6 +2448,10 @@ class ThreeEstatesServer:
         character_group_context,
         character_generation_mode,
     ):
+        planned_character_names = self.ensure_character_name_roster(
+            roles,
+            character_group_context,
+        )
         required_counts = Counter(roles)
         existing_counts = Counter(
             persona.scratch.role
@@ -2363,31 +2468,37 @@ class ThreeEstatesServer:
                 self.generate_immersion_cast(
                     roles,
                     character_group_context,
-                    existing_character_names=sorted(self.personas),
+                    planned_character_names,
                 )
         else:
-            existing_character_names = sorted(self.personas)
-            role_totals = role_counts_for_mode(self.game_mode)
-            role_seen = Counter(existing_counts)
             random.shuffle(remaining_roles)
-            for role in remaining_roles:
-                role_seen[role] += 1
-                role_label = (
-                    f"{role} {role_seen[role]}"
-                    if role_totals[role] > 1
-                    else role
+            remaining_names = [
+                name
+                for name in planned_character_names
+                if name not in self.personas
+            ]
+            if len(remaining_names) != len(remaining_roles):
+                raise ValueError(
+                    "The fixed character roster and remaining role slots no longer match: "
+                    f"{len(remaining_names)} names for {len(remaining_roles)} roles."
                 )
-                existing_character_choices = ",".join(existing_character_names)
-                new_character = self.generate_character(
+            for roster_name, role in zip(remaining_names, remaining_roles):
+                character_dict = self.generate_character_profile(
+                    character_group_context,
+                    roster_name,
+                    planned_character_names,
+                )
+                self.create_persona_from_character_profile(
+                    character_dict,
                     role,
                     character_group_context,
-                    existing_character_choices,
-                    role_label=role_label,
                 )
-                existing_character_names.append(new_character.scratch.name)
                 self.update_new_cast_setup(
-                    stage="generating_characters",
-                    generated_character_names=sorted(self.personas),
+                    stage="generating_character_profiles",
+                    planned_character_names=planned_character_names,
+                    generated_character_names=[
+                        name for name in planned_character_names if name in self.personas
+                    ],
                 )
 
         if len(self.personas) != len(roles):
@@ -2398,9 +2509,9 @@ class ThreeEstatesServer:
         self.save_personas_only("characters_generated")
         self.update_new_cast_setup(
             stage="characters_generated",
-            generated_character_names=sorted(self.personas),
+            planned_character_names=planned_character_names,
+            generated_character_names=planned_character_names,
         )
-
     def session_context_path(self):
         return os.path.join(save_file, SESSION_CONTEXT_FILE)
 
@@ -2454,7 +2565,7 @@ class ThreeEstatesServer:
         context_payload["new_cast_setup"] = setup
         write_json_atomic(self.session_context_path(), context_payload)
         if stage:
-            print(f"Saved new-cast setup checkpoint ({stage})")
+            print(tr("terminal.saved_cast_checkpoint", stage=stage))
         return setup
 
     def save_new_cast_persona_progress(self, persona, stage, progress_key, completed_names):
@@ -2470,14 +2581,15 @@ class ThreeEstatesServer:
         summary_entry = {
             "session_id": self.session_id,
             "final_time": str(self.curr_time),
+            "locale": ACTIVE_LOCALE,
             "summary": game_summary,
         }
         summaries = [entry for entry in summaries if entry.get("session_id") != self.session_id]
         summaries.append(summary_entry)
         context_payload["post_game_summaries"] = summaries
         context_payload["latest_game_summary"] = game_summary
-        with open(self.session_context_path(), "w") as outfile:
-            json.dump(context_payload, outfile, indent=2)
+        with open(self.session_context_path(), "w", encoding="utf-8") as outfile:
+            json.dump(context_payload, outfile, indent=2, ensure_ascii=False)
 
     def mark_relationship_generation_complete(self):
         context_payload = self.load_character_context_payload()
@@ -2554,23 +2666,17 @@ class ThreeEstatesServer:
 
     def prompt_for_previous_game_context_carryover(self, context_payload):
         while True:
-            choice = input(
-                "Do you want this new game to carry over the context established by previous games? yes or no\n"
-            ).strip().lower()
-            if choice in {"yes", "y"}:
+            choice = input(tr("terminal.previous_context")).strip().lower()
+            if choice in YES_ALIASES:
                 return self.build_reuse_character_context(context_payload, include_previous_games=True)
-            if choice in {"no", "n"}:
+            if choice in NO_ALIASES:
                 return self.build_reuse_character_context(context_payload, include_previous_games=False)
-            print("Please type 'yes' or 'no'.")
+            print(tr("terminal.invalid_yes_no"))
 
     def prompt_for_additional_scenario_context(self, reusable_context):
-        additional_context = input(
-            "Enter fresh replacement character/scenario context for THIS NEW GAME ONLY. "
-            "The previous game's temporary context is ignored. Press Enter for no scenario addition "
-            "and to proceed directly to the per-relationship game-only context ritual:\n"
-        ).strip()
+        additional_context = input(tr("terminal.enter_replacement_context")).strip()
         if not additional_context:
-            print("No game-only scenario context entered; using only the permanent initial context.")
+            print(tr("terminal.no_replacement_context"))
             return reusable_context
         return (
             f"{str(reusable_context or '').rstrip()}\n\n"
@@ -2619,17 +2725,10 @@ class ThreeEstatesServer:
                     relationship_pairs.add(tuple(sorted((name, other_name))))
 
         if not relationship_pairs:
-            print(
-                "No permanent base relationships exist between this cast, "
-                "so there is no game-specific relationship context to enter."
-            )
+            print(tr("terminal.no_base_relationships"))
             return cast
 
-        print(
-            "Fresh game-only relationship context follows for every established pair. "
-            "These additions replace the previous game's temporary relationship context, "
-            "remain separate from the permanent base records, and do not carry into another new game."
-        )
+        print(tr("terminal.fresh_relationship_intro"))
         for first_name, second_name in sorted(relationship_pairs):
             first_character = characters_by_name[first_name]
             second_character = characters_by_name[second_name]
@@ -2640,25 +2739,36 @@ class ThreeEstatesServer:
                 (second_character.get("relationships") or {}).get(first_name, "") or ""
             ).strip()
 
-            print(f"\nPermanent base relationship: {first_name} ↔ {second_name}")
+            print(tr("terminal.base_relationship", first=first_name, second=second_name))
             if first_base == second_base:
-                print(first_base or "(No base relationship text is recorded.)")
+                print(first_base or tr("terminal.no_relationship_record"))
             else:
-                print(f"{first_name}'s base record:\n{first_base or '(none)'}")
-                print(f"{second_name}'s base record:\n{second_base or '(none)'}")
+                print(tr(
+                    "terminal.directional_record",
+                    name=first_name,
+                    record=first_base or tr("terminal.no_relationship_record"),
+                ))
+                print(tr(
+                    "terminal.directional_record",
+                    name=second_name,
+                    record=second_base or tr("terminal.no_relationship_record"),
+                ))
 
-            shared_context = input(
-                f"1/3 — Enter relationship context shared by {first_name} and {second_name} "
-                "for THIS NEW GAME ONLY, or press Enter for none:\n"
-            ).strip()
-            first_context = input(
-                f"2/3 — Enter context applying only to {first_name}'s view of "
-                f"{second_name} for THIS NEW GAME ONLY, or press Enter for none:\n"
-            ).strip()
-            second_context = input(
-                f"3/3 — Enter context applying only to {second_name}'s view of "
-                f"{first_name} for THIS NEW GAME ONLY, or press Enter for none:\n"
-            ).strip()
+            shared_context = input(tr(
+                "terminal.fresh_relationship_shared",
+                first=first_name,
+                second=second_name,
+            )).strip()
+            first_context = input(tr(
+                "terminal.fresh_relationship_first",
+                first=first_name,
+                second=second_name,
+            )).strip()
+            second_context = input(tr(
+                "terminal.fresh_relationship_second",
+                first=first_name,
+                second=second_name,
+            )).strip()
 
             first_game_context = "\n\n".join(
                 part for part in (shared_context, first_context) if part
@@ -2691,12 +2801,10 @@ class ThreeEstatesServer:
                     relationship_pairs.add(tuple(sorted((name, other_name))))
 
         if not relationship_pairs:
-            print("No established relationships exist between the characters in this cast, so there are no relationship updates to enter.")
+            print(tr("terminal.no_relationship_updates"))
             return cast
 
-        print(
-            "Optional between-game relationship updates follow. For each affected directional record, everything from the first BETWEEN-GAME RELATIONSHIP UPDATE marker through the end—including all later sentences, paragraphs, and direction-specific details—is replaced. Both complete old directional records are retained in character_context.json metadata."
-        )
+        print(tr("terminal.relationship_update_intro"))
         relationship_update_history = list(
             (context_payload or {}).get("relationship_update_history", [])
         )
@@ -2721,21 +2829,31 @@ class ThreeEstatesServer:
             first_existing = str(first_relationships.get(second_name, "") or "").strip()
             second_existing = str(second_relationships.get(first_name, "") or "").strip()
 
-            print(f"\nRelationship: {first_name} ↔ {second_name}")
+            print(tr("terminal.relationship_heading", first=first_name, second=second_name))
             if first_existing == second_existing:
-                print(first_existing or "(No relationship text is currently recorded.)")
+                print(first_existing or tr("terminal.no_relationship_record"))
             else:
-                print(f"{first_name}'s record:\n{first_existing or '(none)'}")
-                print(f"{second_name}'s record:\n{second_existing or '(none)'}")
-            shared_update = input(
-                "Enter replacement relationship context for both directional records, or press Enter for no shared replacement. A non-empty answer replaces each record's entire old marked tail, not only its first paragraph:\n"
-            ).strip()
-            first_exclusive_update = input(
-                f"Enter direction-specific context for the NEW marked tail only in {first_name}'s relationship record about {second_name}, or press Enter for none:\n"
-            ).strip()
-            second_exclusive_update = input(
-                f"Enter direction-specific context for the NEW marked tail only in {second_name}'s relationship record about {first_name}, or press Enter for none:\n"
-            ).strip()
+                print(tr(
+                    "terminal.directional_record",
+                    name=first_name,
+                    record=first_existing or tr("terminal.no_relationship_record"),
+                ))
+                print(tr(
+                    "terminal.directional_record",
+                    name=second_name,
+                    record=second_existing or tr("terminal.no_relationship_record"),
+                ))
+            shared_update = input(tr("terminal.update_relationship_shared")).strip()
+            first_exclusive_update = input(tr(
+                "terminal.update_relationship_first",
+                first=first_name,
+                second=second_name,
+            )).strip()
+            second_exclusive_update = input(tr(
+                "terminal.update_relationship_second",
+                first=first_name,
+                second=second_name,
+            )).strip()
             if not any((shared_update, first_exclusive_update, second_exclusive_update)):
                 continue
 
@@ -2907,13 +3025,17 @@ class ThreeEstatesServer:
         if not resume_existing or not self.debug_log_path:
             timestamp = datetime.datetime.now().strftime(RUN_LOG_TIME_FORMAT)
             self.debug_log_path = os.path.join(log_dir, f"debug_{self.session_id}_{timestamp}.log")
-        set_dialogue_log_path(self.dialogue_log_path, log_dir=log_dir)
+        set_dialogue_log_path(
+            self.dialogue_log_path,
+            log_dir=log_dir,
+            character_names=self.personas.keys(),
+        )
         set_clean_dialogue_log_path(self.clean_dialogue_log_path)
         set_debug_log_path(self.debug_log_path)
         self.save_session_metadata()
-        print(f"dialogue log: {self.dialogue_log_path}")
-        print(f"clean dialogue log: {self.clean_dialogue_log_path}")
-        print(f"debug log: {self.debug_log_path}")
+        print(tr("terminal.dialogue_log", path=self.dialogue_log_path))
+        print(tr("terminal.clean_dialogue_log", path=self.clean_dialogue_log_path))
+        print(tr("terminal.debug_log", path=self.debug_log_path))
 
     def epilogue_path(self):
         log_dir = os.path.join(save_file, "dialogue_logs")
@@ -3008,16 +3130,16 @@ class ThreeEstatesServer:
         if os.path.isfile(epilogue_path):
             with open(epilogue_path) as infile:
                 epilogue = infile.read().strip()
-            print("\nPost-game VN epilogue:")
+            print(tr("terminal.post_game_epilogue"))
             print(epilogue)
-            print(f"\nepilogue log: {epilogue_path}")
+            print(tr("terminal.epilogue_log", path=epilogue_path))
             return epilogue
 
         epilogue_context = self.build_epilogue_context(results)
-        line_count_instruction = (
-            "Write about 80 total lines."
-            if str(self.game_mode) == "16"
-            else "Write about 60 total lines."
+        epilogue_entry_count = 80 if str(self.game_mode) == "16" else 60
+        line_count_instruction = tr(
+            "prompt.epilogue_content_count",
+            count=epilogue_entry_count,
         )
         winners = [name for name, won in sorted(results["final_results"].items()) if won]
         losers = [name for name, won in sorted(results["final_results"].items()) if not won]
@@ -3028,35 +3150,37 @@ class ThreeEstatesServer:
             ),
             {
                 "game_summary": (
-                    f"The game ended with {', '.join(winners) or 'no one'} winning, while "
-                    f"{', '.join(losers) or 'no one'} lost. The night's conversations and choices left "
-                    "the cast to reckon with the alliances, suspicions, and surprises that developed between them."
+                    tr(
+                        "postgame.fallback_summary",
+                        winners=", ".join(winners) or tr("postgame.no_one"),
+                        losers=", ".join(losers) or tr("postgame.no_one"),
+                    )
                 ),
-                "vn_epilogue": "*The room settles after the final bell, everyone too tired and too awake to leave just yet.*",
+                "vn_epilogue": tr("postgame.fallback_epilogue"),
             },
         )
         game_summary = generated_postgame["game_summary"].strip()
         epilogue = generated_postgame["vn_epilogue"].strip()
         self.save_game_summary_to_character_context(game_summary)
-        with open(epilogue_path, "w") as outfile:
+        with open(epilogue_path, "w", encoding="utf-8") as outfile:
             outfile.write(epilogue.strip() + "\n")
         if debug and self.debug_log_path:
-            with open(self.debug_log_path, "a") as outfile:
+            with open(self.debug_log_path, "a", encoding="utf-8") as outfile:
                 outfile.write(f"\n[{self.curr_time}] POST-GAME SUMMARY\n")
                 outfile.write(game_summary + "\n")
                 outfile.write(f"\n[{self.curr_time}] POST-GAME VN EPILOGUE\n")
                 outfile.write(epilogue + "\n")
         if self.clean_dialogue_log_path:
-            with open(self.clean_dialogue_log_path, "a") as outfile:
+            with open(self.clean_dialogue_log_path, "a", encoding="utf-8") as outfile:
                 outfile.write(f"\n[{self.curr_time}] POST-GAME SUMMARY\n")
                 outfile.write(game_summary + "\n")
                 outfile.write(f"\n[{self.curr_time}] POST-GAME VN EPILOGUE\n")
                 outfile.write(epilogue.strip() + "\n")
-        print("\nPost-game summary:")
+        print(tr("terminal.post_game_summary"))
         print(game_summary)
-        print("\nPost-game VN epilogue:")
+        print(tr("terminal.post_game_epilogue"))
         print(epilogue)
-        print(f"\nepilogue log: {epilogue_path}")
+        print(tr("terminal.epilogue_log", path=epilogue_path))
         return epilogue
 
 
@@ -3066,7 +3190,7 @@ class ThreeEstatesServer:
         roles = role_pool_for_mode(self.game_mode)
 
         try:
-            print("save_file: ", save_file)
+            print(tr("terminal.save_file", path=save_file))
             session_mode = self.choose_session_mode()
             selected_conversation_mode = None
             reuse_context_mode = "base"
@@ -3083,7 +3207,7 @@ class ThreeEstatesServer:
             reused_existing_characters = session_mode in {"reuse_same_roles", "reuse_reroll_roles", "reuse_exact_setup"}
             reuse_exact_setup = session_mode == "reuse_exact_setup"
             if session_mode in {"resume", "legacy", "resume_generation"}:
-                print("save file detected, loading")
+                print(tr("terminal.loading_save"))
                 self.load_session_metadata()
                 context_payload = self.load_character_context_payload()
                 if resuming_new_cast_setup:
@@ -3105,7 +3229,7 @@ class ThreeEstatesServer:
                         self.choose_conversation_mode()
                         current_stage = (
                             (context_payload.get("new_cast_setup") or {}).get("stage")
-                            or "generating_characters"
+                            or "generating_character_names"
                         )
                         self.update_new_cast_setup(
                             stage=current_stage,
@@ -3250,15 +3374,16 @@ class ThreeEstatesServer:
                 self.session_id = uuid.uuid4().hex[:12]
                 self.choose_game_mode_for_new_cast()
                 roles = role_pool_for_mode(self.game_mode)
-                character_group_context = input("Enter the context in which you generate characters:\n")
+                character_group_context = input(tr("terminal.enter_generation_context"))
                 character_generation_mode = self.choose_character_generation_mode()
                 self.choose_conversation_mode()
                 self.save_character_context(
                     character_group_context,
                     character_generation_mode,
                     new_cast_setup={
-                        "stage": "generating_characters",
+                        "stage": "generating_character_names",
                         "conversation_mode": self.conversation_mode,
+                        "planned_character_names": [],
                         "generated_character_names": [],
                     },
                 )
@@ -3270,7 +3395,14 @@ class ThreeEstatesServer:
                     "normal",
                 )
                 setup = self.new_cast_setup_payload()
-                if setup.get("stage") == "generating_characters":
+                if setup.get("stage") in {
+                    "generating_characters",
+                    "generating_character_names",
+                    "character_names_generated",
+                    "generating_character_profiles",
+                    "assigning_immersion_roles",
+                    "creating_personas",
+                }:
                     self.complete_new_cast_character_generation(
                         roles,
                         character_group_context,
@@ -3300,7 +3432,7 @@ class ThreeEstatesServer:
 
                 if not self.should_start_game_after_generation():
                     self.update_new_cast_setup(stage="complete")
-                    print("Prepared character set and relationships saved. Exiting before seating/game start.")
+                    print(tr("terminal.prepared_cast_saved"))
                     return
                 self.update_new_cast_setup(stage="complete")
 
@@ -3340,7 +3472,7 @@ class ThreeEstatesServer:
                     debug_log(f"[RESUME] session_id={self.session_id} | t={self.curr_time} | loaded_characters={list(self.personas.keys())}")
 
             while True:
-                print(f"{timedelta_to_natural(self.curr_time)} since the game started")
+                print(tr("terminal.time_since_start", time=timedelta_to_natural(self.curr_time)))
                 for table in self.room.locations.values():
                     self.expire_table_timer_if_needed(table)
                 self.sync_endgame_mode()
@@ -3350,7 +3482,7 @@ class ThreeEstatesServer:
                     self.flush_pending_arrivals_before_game_end()
                     break
                 game_timer = game_end_time() - self.curr_time
-                print(f"{timedelta_to_natural(game_timer)} left until the game ends")
+                print(tr("terminal.time_until_end", time=timedelta_to_natural(game_timer)))
 
                 if self.next_phase == "departure":
                     any_departures = False
@@ -3405,14 +3537,19 @@ class ThreeEstatesServer:
             )
             self.run_spinster_endgame_guess_round()
             results = resolve_endgame(self.room)
-            print("Final results:")
+            print(tr("terminal.final_results"))
             for player_name, won in sorted(results["final_results"].items()):
-                outcome = "wins" if won else "loses"
+                outcome = tr("terminal.wins") if won else tr("terminal.loses")
                 role = self.personas[player_name].scratch.role
-                print(f"- {player_name} ({role}): {outcome}")
+                print(tr(
+                    "terminal.result_line",
+                    name=player_name,
+                    role=display_name("role", role),
+                    outcome=outcome,
+                ))
             if results["flipped_by_spinster"]:
                 flipped = ", ".join(results["flipped_by_spinster"])
-                print(f"Spinster reversal applied to: {flipped}")
+                print(tr("terminal.spinster_reversal", names=flipped))
             self.append_results_to_dialogue_log(
                 "FINAL RESULTS",
                 results["final_results"],
@@ -3420,21 +3557,20 @@ class ThreeEstatesServer:
             )
             self.generate_and_save_vn_epilogue(results)
             self.save_checkpoint("game_end")
-            time.sleep(self.server_sleep)
         except KeyboardInterrupt:
-            print("\nKeyboard interrupt received. Stopping without saving a mid-timestep state.")
+            print(tr("terminal.keyboard_interrupt"))
             if os.path.isfile(self.session_state_path()):
-                print(f"Resume will use the latest stable checkpoint: {self.session_state_path()}")
+                print(tr("terminal.resume_checkpoint", path=self.session_state_path()))
             else:
-                print("No stable checkpoint exists yet, so there is no game state to resume from.")
+                print(tr("terminal.no_checkpoint"))
             return
         except FatalLLMError as exc:
-            print(f"\nFatal LLM error: {exc}")
-            print("Stopping simulation immediately without saving a mid-timestep state.")
+            print(tr("terminal.fatal_llm", error=exc))
+            print(tr("terminal.stop_after_llm"))
             if os.path.isfile(self.session_state_path()):
-                print(f"Resume will use the latest stable checkpoint: {self.session_state_path()}")
+                print(tr("terminal.resume_checkpoint", path=self.session_state_path()))
             else:
-                print("No stable checkpoint exists yet, so there is no game state to resume from.")
+                print(tr("terminal.no_checkpoint"))
             raise SystemExit(1)
 
 

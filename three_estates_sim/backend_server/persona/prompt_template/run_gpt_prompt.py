@@ -15,14 +15,22 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 from global_methods import *
-from paths import resolve_backend_file
+from localization import (
+  localized_prompt_data,
+  localized_prompt_path,
+  prompt_language_instruction,
+)
 from persona.prompt_template.gpt_structure import *
 # from persona.prompt_template.print_prompt import *
 
 
 def read_prompt_template(prompt_template):
-  with open(resolve_backend_file(prompt_template), "r") as f:
-    return f.read()
+  with open(localized_prompt_path(prompt_template), "r", encoding="utf-8") as f:
+    prompt = f.read()
+  language_instruction = prompt_language_instruction()
+  if language_instruction:
+    return f"{language_instruction}\n\n{prompt}"
+  return prompt
 
 
 def json_cleanup(output):
@@ -318,19 +326,53 @@ def build_stay_at_table_reason(persona, table, extra_reasons=None):
   return "; and ".join(reasons)
 
 
-def run_gpt_prompt_generate_character(character_group_context, existing_character_choices, test_input=None, verbose=False):
-
-  if not existing_character_choices:
-    existing_character_choices = "This is the first generation in the group"
-  else:
-    existing_character_choices = "You have to come up with another character other than the ones already present in the group: " + existing_character_choices
+def run_gpt_prompt_generate_character_names(character_group_context, cast_size, existing_names=None, test_input=None, verbose=False):
+  existing_names = list(existing_names or [])
   data = {
     "character_group_context": character_group_context,
-    "existing_character_choices":existing_character_choices
+    "cast_size": cast_size,
+    "existing_names": json.dumps(existing_names, ensure_ascii=False),
+  }
+  prompt_template = "persona/prompt_template/templates/generate_character_names.txt"
+  prompt = read_prompt_template(prompt_template)
+  final_prompt = prompt.format(**localized_prompt_data(data))
+
+  def character_names_cleanup(output):
+    parsed = json_cleanup(output)
+    names = parsed.get("names")
+    if not isinstance(names, list) or len(names) != cast_size:
+      raise ValueError(
+        f"Character roster must contain exactly {cast_size} names"
+      )
+    cleaned_names = [str(name or "").strip() for name in names]
+    if any(not name for name in cleaned_names):
+      raise ValueError("Character roster contains an empty name")
+    if len({name.casefold() for name in cleaned_names}) != cast_size:
+      raise ValueError("Character roster names must be unique")
+    if cleaned_names[:len(existing_names)] != existing_names:
+      raise ValueError(
+        "Character roster did not preserve already committed names in order"
+      )
+    return {"names": cleaned_names}
+
+  output = ChatGPT_safe_generate_response_full(
+    final_prompt,
+    func_clean_up=character_names_cleanup,
+    model=CHARACTER_GENERATION_LLM_MODEL,
+  )
+  if output != False:
+    return output, [output, prompt, data]
+
+
+def run_gpt_prompt_generate_character(character_group_context, fixed_name, full_roster, test_input=None, verbose=False):
+  data = {
+    "character_group_context": character_group_context,
+    "fixed_name": fixed_name,
+    "full_roster": json.dumps(list(full_roster), ensure_ascii=False),
   }
   prompt_template = "persona/prompt_template/templates/generate_persona.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   #print(output) #debug
@@ -348,7 +390,7 @@ def run_gpt_prompt_generate_innate_appearance(persona, character_group_context, 
     "innate": persona.scratch.innate,
   }
   prompt = read_prompt_template("persona/prompt_template/templates/generate_innate_appearance.txt")
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
     func_clean_up=json_cleanup,
@@ -378,7 +420,7 @@ def run_gpt_prompt_generate_clothing(persona, character_group_context, test_inpu
     "innate_appearance": profile.get("innate_appearance", ""),
   }
   prompt = read_prompt_template("persona/prompt_template/templates/generate_clothing.txt")
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
     func_clean_up=json_cleanup,
@@ -398,7 +440,7 @@ def run_gpt_prompt_assign_immersion_roles(character_group_context, character_pro
 
   prompt_template = "persona/prompt_template/templates/assign_immersion_roles.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   if output != False:
@@ -416,7 +458,7 @@ def run_gpt_prompt_generate_relationship(character_group_context, persona1, pers
 
   prompt_template = "persona/prompt_template/templates/generate_relationship.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   if output != False: 
@@ -433,14 +475,19 @@ def run_gpt_prompt_select_relationship_pairs(character_group_context, cast_infor
 
   prompt_template = "persona/prompt_template/templates/select_relationship_pairs.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup, model=CHARACTER_GENERATION_LLM_MODEL)
   if output != False:
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_generate_vn_epilogue(epilogue_context, line_count_instruction="Write 50 to 60 total lines.", test_input=None, verbose=False):
+def run_gpt_prompt_generate_vn_epilogue(
+  epilogue_context,
+  line_count_instruction="Write 50 to 60 actual scene entries; blank separator lines and wrapper tags do not count.",
+  test_input=None,
+  verbose=False,
+):
   data = {
     "PREFIX": PREFIX,
     "epilogue_context": epilogue_context,
@@ -448,14 +495,19 @@ def run_gpt_prompt_generate_vn_epilogue(epilogue_context, line_count_instruction
   }
   prompt_template = "persona/prompt_template/templates/generate_vn_epilogue.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=text_cleanup, model=EPILOGUE_GENERATION_LLM_MODEL)
   if output != False:
     return output, [output, prompt, data]
 
 
-def run_gpt_prompt_generate_game_summary_and_vn_epilogue(epilogue_context, line_count_instruction="Write 50 to 60 total lines.", test_input=None, verbose=False):
+def run_gpt_prompt_generate_game_summary_and_vn_epilogue(
+  epilogue_context,
+  line_count_instruction="Write 50 to 60 actual scene entries; blank separator lines and wrapper tags do not count.",
+  test_input=None,
+  verbose=False,
+):
   data = {
     "PREFIX": PREFIX,
     "epilogue_context": epilogue_context,
@@ -463,7 +515,7 @@ def run_gpt_prompt_generate_game_summary_and_vn_epilogue(epilogue_context, line_
   }
   prompt_template = "persona/prompt_template/templates/generate_game_summary_and_vn_epilogue.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -499,7 +551,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
 
   prompt_template = "persona/prompt_template/templates/generate_next_convo_line_normal.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -535,7 +587,7 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
 
   prompt_template = "persona/prompt_template/templates/generate_next_convo_line_special.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -562,7 +614,7 @@ def run_gpt_prompt_chat_poignancy(persona, chat, test_input=None, verbose=False)
     else "persona/prompt_template/templates/poignancy_chat.txt"
   )
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -583,7 +635,7 @@ def run_gpt_prompt_event_poignancy(persona, event_description, test_input=None, 
 
   prompt_template = "persona/prompt_template/templates/poignancy_event.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -605,7 +657,7 @@ def run_gpt_prompt_thought_poignancy(persona, thought_description, test_input=No
 
   prompt_template = "persona/prompt_template/templates/poignancy_thought.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -645,7 +697,7 @@ def run_gpt_prompt_act_bidding_ability(persona, table, action_context="", test_i
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_ability.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -658,7 +710,7 @@ def run_gpt_prompt_act_bidding_reveal(persona, table, action_context="", test_in
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_reveal.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -671,7 +723,7 @@ def run_gpt_prompt_act_bidding_nun_reveal(persona, table, action_context="", tes
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_nun_reveal.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
 
@@ -709,7 +761,7 @@ def run_gpt_prompt_act_bidding_unified(persona, table, action_options, action_co
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_unified.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
 
@@ -871,7 +923,7 @@ def run_gpt_prompt_act_bidding_speak(persona, table, action_context="", test_inp
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_speaking.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -887,7 +939,7 @@ def run_gpt_prompt_act_bidding_retrieve(persona, table, retrieval_options, actio
 
   prompt_template = "persona/prompt_template/templates/reaction_bidding_retrieve.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1026,7 +1078,7 @@ def run_gpt_prompt_decide_on_leaving(persona, table, retrieved_all_tables, test_
 
   prompt_template = "persona/prompt_template/templates/decide_on_moving.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1084,7 +1136,7 @@ def run_gpt_prompt_select_ability_target(persona, table, ability_reasoning="", t
   }
   prompt_template = "persona/prompt_template/templates/select_ability_target.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1121,7 +1173,7 @@ def run_gpt_prompt_guess_family_bishop(persona, target, table, ability_reasoning
   }
   prompt_template = "persona/prompt_template/templates/guess_family_bishop.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   if output != False:
@@ -1160,7 +1212,7 @@ def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, 
   }
   prompt_template = "persona/prompt_template/templates/bishop_wrong_guess_response.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
@@ -1190,12 +1242,12 @@ def run_gpt_prompt_spinster_endgame_guess(persona, table, test_input=None, verbo
   }
   prompt_template = "persona/prompt_template/templates/spinster_endgame_guess.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
     func_clean_up=json_cleanup,
-    model=DIALOGUE_GENERATION_LLM_MODEL,
+    model=SPINSTER_GUESS_LLM_MODEL,
   )
   if output != False:
     return output, [output, prompt, data_sub]
@@ -1266,7 +1318,7 @@ def run_gpt_prompt_decide_baron_block(persona, table, revealed_player, action_co
   }
   prompt_template = "persona/prompt_template/templates/decide_baron_block.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   if output != False:
@@ -1298,7 +1350,7 @@ def run_gpt_prompt_decide_innkeeper_declaration(persona, table, source_table, te
   }
   prompt_template = "persona/prompt_template/templates/decide_innkeeper_declaration.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   if output != False:
@@ -1346,7 +1398,7 @@ def run_gpt_prompt_decide_movement_ability_use(persona, table, destination, move
   }
   prompt_template = "persona/prompt_template/templates/decide_movement_ability_use.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data_sub)
+  final_prompt = prompt.format(**localized_prompt_data(data_sub))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   if output != False:
@@ -1444,7 +1496,7 @@ def run_gpt_prompt_select_ability_destination(persona, table, retrieved_all_tabl
 
   prompt_template = "persona/prompt_template/templates/select_ability_destination.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1475,7 +1527,7 @@ def run_gpt_prompt_decide_card_retrieval(persona, table, object, test_input=None
   data["stay_at_table_reason"] = build_stay_at_table_reason(persona, table, [extra_reason])
   prompt_template = "persona/prompt_template/templates/decide_card_retrieval.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1505,7 +1557,7 @@ def run_gpt_prompt_reflect_on_subject(persona, subject_events, subject_thoughts,
        "question":focal_point}
   prompt_template = "persona/prompt_template/templates/reflect_person_personality.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   
@@ -1540,7 +1592,7 @@ def run_gpt_prompt_reflect_on_board_state(persona, focal_retrievals, prior_board
   }
   prompt_template = "persona/prompt_template/templates/reflect_board_state.txt"
   prompt = read_prompt_template(prompt_template)
-  final_prompt = prompt.format(**data)
+  final_prompt = prompt.format(**localized_prompt_data(data))
 
   output = ChatGPT_safe_generate_response_full(final_prompt, func_clean_up=json_cleanup)
   if output != False:

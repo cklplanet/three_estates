@@ -44,6 +44,7 @@ Natural action-line discipline:
 - Do not summarize the whole table state.
 - Say what someone would plausibly say while moving, revealing, reacting, or being pressured (or in case of arriving at a table, any announcements you may or may not want to make).
 - Keep timing honest: do not imply you just saw, heard, entered with, or reacted to something unless the context says it happened at this moment; frame older recalled facts as memory, rumor, or prior observation.
+- If another character's claim contradicts your own firsthand experience or a system event you directly perceived, prioritize your own experience as the truth. Treat the conflicting claim as a lie, mistake, boast, or misunderstanding rather than rewriting what you know merely because someone said it confidently or you overheard it. For example, if someone claims that A stole your card after overhearing you and A scuffling at another table, but you personally know that you stole A's card, retain the true direction of the theft: you stole from A.
 - Emotion, implication, and subtext are better than explanation.
 - But you're also allowed to be creative and colorful (in a character-accurate way) in prose or specific about details not directly mentioned in the reasoning or your and others' backgrounds (while keeping the exact wording fresh from line to line; as in do NOT repeat the exact formatting or wording of prior lines, especially your own) when the situation calls for it;
 - - For example (non-exhaustive, with profanity used only when it suits that character and moment):

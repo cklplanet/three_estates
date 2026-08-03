@@ -34,5 +34,5 @@ If your movement reasoning explicitly said or strongly implied that this departu
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character whether you should reveal and use the movement-triggered ability right now in one or two sentences. 
+- "reasoning": "string",  // Explain in-character whether you should reveal and use the movement-triggered ability right now in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "result": "string", // Response is exactly one of: "yes" | "no", all lowercase

@@ -1,0 +1,36 @@
+{PREFIX}
+
+游戏背景：
+{personal_context_msg}
+
+最近参与的对话：
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+{other_table_additional_context}
+
+回应前的当前座位与棋盘信息：
+{current_table_context}
+
+Bishop {bishop_name} 刚把你的家族猜成 {guessed_family}，但你的真实角色是 {actual_role}，真实家族是 {actual_family}。
+你自己的角色牌状态：{card_status}
+
+可选回应：
+{hard_reveal_option}
+- `soft reveal`：只在口头上声称自己的确切角色或家族，不出示牌。
+- `no reveal`：拒绝明确声称任何角色或家族，可以转移话题或保持含糊。
+
+这是对错误猜测的即时反应，不是完整演讲。最好一句，最多两句短句；理由长度限制为：{short_reasoning_limit}。若 `hard reveal`，台词与动作应像正在展示牌；若 `soft reveal`，明确自己口头声称什么但不能假装已经证明；若拒绝，不要意外泄露答案。只有 `practically screaming` 可能被其他桌听见。
+
+只返回下列 JSON。键名、人物姓名及所有枚举值保持英文；自然语言值使用简体中文：
+
+{{
+  "reasoning": "一至两句选择理由",
+  "response": "严格填写 hard reveal、soft reveal 或 no reveal",
+  "object": "严格填写 everyone 或桌上某个人物的原名",
+  "volume": "严格填写 whisper、calm、loud 或 practically screaming",
+  "expression": "1至3个词",
+  "action": "少于60字符的第三人称动作，不含人物姓名及句号",
+  "line": "即时台词"
+}}

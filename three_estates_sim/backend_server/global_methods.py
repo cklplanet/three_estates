@@ -1,4 +1,5 @@
 from utils import *
+from localization import tr
 
 def timedelta_to_natural(delta):
     total_seconds = int(delta.total_seconds())
@@ -10,13 +11,22 @@ def timedelta_to_natural(delta):
 
     parts = []
     if hours > 0:
-        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+        parts.append(tr(f"time.hour.{'one' if hours == 1 else 'other'}", count=hours))
     if minutes > 0:
-        parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+        parts.append(tr(f"time.minute.{'one' if minutes == 1 else 'other'}", count=minutes))
     if seconds > 0 or not parts:
-        parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+        parts.append(tr(f"time.second.{'one' if seconds == 1 else 'other'}", count=seconds))
 
-    result = ' and '.join(parts) if len(parts) <= 2 else ', '.join(parts[:-1]) + f", and {parts[-1]}"
+    if len(parts) == 1:
+        result = parts[0]
+    elif len(parts) == 2:
+        result = tr("time.join_two", first=parts[0], second=parts[1])
+    else:
+        result = tr(
+            "time.join_many",
+            head=tr("time.separator").join(parts[:-1]),
+            last=parts[-1],
+        )
     return f"-{result}" if negative else result
 
 

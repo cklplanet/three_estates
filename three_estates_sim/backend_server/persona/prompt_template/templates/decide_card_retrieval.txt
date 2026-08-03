@@ -23,5 +23,5 @@ There are {total_time_left} until the game ends entirely.
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to retrieve your card right now? Explain in-character your reasoning in one or two sentences. 
+- "reasoning": "string",  // How crucial is it for you to retrieve your card right now? Explain in-character in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "result": "string" // exactly "yes" or "no", all lowercase

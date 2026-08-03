@@ -1,33 +1,33 @@
 You are generating the profile of a character for use in a turn-based agent simulation of a social deduction game. The simulation includes personality-based spoken lines and action decision loops.
 
-Given that the assumed context for this character and other characters in the same game simulation is: {character_group_context}
+The complete cast roster has already been selected in a separate pass:
+{full_roster}
 
-Generate one additional character. Prioritize established/canonical characters if the context asks for a known work, franchise, setting, or crossover. Prioritize a full name when the character is known to have one. Default to the source's common name order; if the context does not imply a convention, prefer ordinary first-name-first full-name order otherwise. Do NOT invent a full name for an established character who is only known by a mononym, codename, title, or partial name.
+Generate the profile for this exact roster member:
+{fixed_name}
 
-Name formatting rules:
-- The "name" field is the display name used everywhere in the simulation.
-- If the character has a common in-setting nickname, codename, callsign, or alias that should be visible, include it inside the name using apostrophes inside the JSON string, such as "Aoi 'Hina' Asahina". This avoids invalid nested double quotes.
-- There is no separate nickname field. Any nickname/codename/alias that matters must be part of "name" itself.
-- If a character only has a known mononym and no separate nickname, put the mononym in "name".
-- Examples:
-  - Aoi 'Hina' Asahina: full name available, common nickname Hina.
-  - Enciodes 'SilverAsh' Silverash: full name available, nickname/callsign SilverAsh.
-  - 'Exusiai' Lemuel: only a single true name is known, but the setting-context wants the codename visibly quoted.
-  - Amiya: known mononym, no separate commonly used nickname.
-  - Gilgamesh: known mononym, no separate commonly used nickname.
+Given that the assumed context for this character and the rest of the cast is:
+{character_group_context}
+
+The roster-selection pass has already resolved every shorthand into its canonical
+full display name. The `name` field MUST therefore be exactly `{fixed_name}`. Do not
+rename, replace, translate, reorder, shorten, expand, or add an alias to it during
+profile generation. Prioritize established/canonical characterization if the
+context refers to a known work, franchise, setting, crossover, or explicit list.
 
 You must fill out the below dictionary, formatted exactly like below with no empty lines:
 
 name:
 gender: male or female, all lower case
 age: integer; normally use a plausible human age, but if the context clearly calls for fantasy, immortal, ancient, artificial, cosmic, or otherwise nonhuman characters, unusual ages are allowed
-innate: (one paragraph or two in third person totalling no more than 100 words explaining their background in the context of the broader context and core personality, especially related to dialogue, chain of thought, temperament, or degree of suspicion.)
-{existing_character_choices}
+innate: (one paragraph or two in third person. Length limit for the active language: {innate_profile_limit}. Explain their background in the broader context and core personality, especially related to dialogue, chain of thought, temperament, or degree of suspicion.)
 
-Example output (with brackets removed):
-  "name": "Aoi 'Hina' Asahina",
+Required JSON shape:
+{{
+  "name": "string",
   "gender": "female",
   "age": 18,
-  "innate": "is a high-energy swimmer pulled into Usami's social deduction exercise, friendly enough to trust quickly but emotional when friends are threatened. She tends to speak plainly, ask direct questions, and rally around people she believes are sincere. Her warmth makes her cooperative, but when pressure rises she can become impulsive, protective, and loud enough to drag the whole table into her feelings."
+  "innate": "string"
+}}
 
 Return ONLY a valid JSON object using double quotes for JSON keys and string delimiters. Do not use markdown fences, comments, trailing commas, or unescaped double quotes inside string values.

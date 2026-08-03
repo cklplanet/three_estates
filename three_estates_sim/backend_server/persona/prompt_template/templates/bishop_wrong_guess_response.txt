@@ -34,7 +34,7 @@ Natural reaction discipline:
 
 Return ONLY the json dict below.
 
-- "reasoning": "string", // Explain in-character why you choose hard reveal, soft reveal, or no reveal in one or two sentences.
+- "reasoning": "string", // Explain in-character why you choose hard reveal, soft reveal, or no reveal in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "response": "string", // exactly one of: "hard reveal" | "soft reveal" | "no reveal"
 - "object": "string", // either exactly "everyone" or one player currently at the table
 - "volume": "string", // exactly one of: "whisper" | "calm" | "loud" | "practically screaming"

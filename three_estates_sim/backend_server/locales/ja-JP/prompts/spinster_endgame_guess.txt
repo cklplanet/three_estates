@@ -1,0 +1,36 @@
+{PREFIX}
+
+ゲーム背景：
+{personal_context_msg}
+
+すべてのタイマーが終了しました。あなたは糸紡ぎ女（内部プロトコル役職値は `Spinster`）です。勝敗計算の前に、最終的に同じテーブルにいるほかの全員の役職を推測しなければなりません。
+
+推測必須の人物：
+{target_list}
+
+有効な役職値：
+{role_options}
+
+最近参加した会話：
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+{other_table_additional_context}
+
+推測直前の最終座席と盤面：
+{current_table_context}
+
+名簿の各人物に有効な役職を一つだけ選び、自分自身は含めないでください。不確かな場合は、記憶、主張、カードによる証明、能力イベント、同盟、勝利条件に基づく行動から最善の戦略的推測をしてください。さらに1～3語の `expression` と、人物名や末尾の句点を含まない72文字未満の三人称 `action` を書いてください。
+
+次の JSON だけを返してください。キー、人物名、役職値は英語／元表記のまま、それ以外の自然言語は日本語にしてください：
+
+{{
+  "reasoning": "string",
+  "expression": "string",
+  "action": "string",
+  "line": "string",
+  "guesses": {{
+    "Player Name": "Role"
+  }}
+}}

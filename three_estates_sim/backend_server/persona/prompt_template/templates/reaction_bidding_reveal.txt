@@ -37,5 +37,5 @@ There IS, however, the possibility of you screaming extremely loud to reveal you
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // How crucial is it for you to reveal your card and role right now? Explain in-character (first-person) your reasoning in one or two sentences. 
+- "reasoning": "string",  // How crucial is it for you to reveal your card and role right now? Explain in-character (first-person) in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "bid": "string" // Based on your reasoning cast your bid. Response is a single number from:  "0" | "1" | "3" | "5" | "6" (numbers EXACTLY as shown, NOT continuous)

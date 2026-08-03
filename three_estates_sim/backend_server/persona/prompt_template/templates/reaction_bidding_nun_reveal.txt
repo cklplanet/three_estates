@@ -37,5 +37,5 @@ This is a special nun-reveal action:
 - There are {total_time_left} until the game ends entirely.
 return ONLY the json dict below.
 
-- "reasoning": "string", // Explain in-character why showing the Nun card is or is not useful right now in one or two sentences.
+- "reasoning": "string", // Explain in-character why showing the Nun card is or is not useful right now in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "bid": "string" // exactly one of: "0" | "3" | "4" | "6"

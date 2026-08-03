@@ -1,0 +1,67 @@
+You are selecting the complete character roster for a turn-based social deduction simulation.
+
+Initial game/character context:
+{character_group_context}
+
+The ruleset requires exactly {cast_size} unique character display names.
+
+Names already created by an older interrupted generation, if any:
+{existing_names}
+
+This call selects NAMES ONLY. Do not generate personality, age, gender, appearance,
+clothing, relationships, roles, or any other profile information.
+
+AUTHORITATIVE EXPLICIT-LIST RULE:
+- First determine whether the supplied context explicitly provides a list or roster
+  of characters to use.
+- If it does, follow the IDENTITY and ORDER of that list as strictly as possible.
+  Do not swap a listed character for a supposedly better-known, more canonical, or
+  more suitable character.
+- However, roster selection is also the one and only name-resolution pass. Every
+  listed shorthand, partial name, title-plus-given-name, codename, or mixed-language
+  label MUST be expanded immediately into that same character's canonical full
+  display name whenever a longer canonical name exists. All later profile calls
+  will use the roster spelling literally and will not get another chance to expand
+  it.
+- Resolve names while considering the entire roster and initial context together.
+  Use shared franchise, setting, nearby names, and crossover grouping to disambiguate
+  a shorthand label before choosing its full name; do not resolve each entry as if
+  it appeared alone.
+- If the explicit list contains exactly {cast_size} unique character identities,
+  return those exact characters in order, using their resolved canonical full
+  display names.
+- If it contains fewer than {cast_size}, retain all listed names in their supplied
+  order and fill only the missing slots with context-appropriate characters.
+- If it contains more than {cast_size}, retain the first {cast_size} unique listed
+  names in their supplied order because the game cannot seat more players.
+- Names from an interrupted generation are already committed. Keep them first and
+  fill only missing slots without duplicates.
+
+If the context does not provide an explicit roster, select a coherent complete cast
+from the requested work, franchise, setting, crossover, theme, or original premise.
+Prefer canonical established characters when appropriate.
+
+Name formatting rules:
+- Use the display name that should appear everywhere in the simulation.
+- Prefer a full name when the character canonically has one, using the source's
+  common name order.
+- Do not invent a full name for an established mononym, codename, title, or partial
+  name.
+- A visible nickname/callsign may appear in apostrophes inside the name, such as
+  `Aoi 'Hina' Asahina`.
+- Do not leave a known full name abbreviated merely because the initial context did.
+- Example: `Saber Artoria` should be resolved during THIS roster pass to
+  `Artoria 'Saber' Pendragon`.
+- Examples:
+  - `Aoi 'Hina' Asahina`: full name available, common nickname Hina.
+  - `Enciodes 'SilverAsh' Silverash`: full name available, nickname/callsign
+    SilverAsh.
+  - `'Exusiai' Lemuel`: only a single true name is known, but the setting context
+    wants the codename visibly quoted.
+  - `Amiya`: known mononym, no separate commonly used nickname.
+  - `Gilgamesh`: known mononym, no separate commonly used nickname.
+
+Return ONLY this valid JSON object with exactly {cast_size} unique strings:
+{{
+  "names": ["First Character", "Second Character"]
+}}

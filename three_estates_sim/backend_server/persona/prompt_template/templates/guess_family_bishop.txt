@@ -18,5 +18,5 @@ If you wish to use your ability, please indicate:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
--  "reasoning": "string"  // Explain in-character your reasoning on which target(s) to use your ability on in one or two sentences. 
+-  "reasoning": "string"  // Explain in-character your reasoning on which target(s) to use your ability on in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 -  "target": "string"                // Target, ONLY from the options provided to you, exactly as is

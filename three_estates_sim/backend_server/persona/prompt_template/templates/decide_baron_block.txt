@@ -43,5 +43,5 @@ Use exactly one of these bid values:
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character how badly you want this Baron reaction right now in one or two sentences.
+- "reasoning": "string",  // Explain in-character how badly you want this Baron reaction right now in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "bid": "string" // Response is exactly one of: "0" | "3" | "6"

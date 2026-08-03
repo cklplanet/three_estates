@@ -27,5 +27,5 @@ Decide specifically whether revealing and declaring AFTER all arrivals in the cu
 
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
-- "reasoning": "string",  // Explain in-character whether you should precommit to revealing and declaring after all current-phase arrivals have seated, in one or two sentences. 
+- "reasoning": "string",  // Explain in-character whether you should precommit to revealing and declaring after all current-phase arrivals have seated, in one or two sentences. Length limit for the active language: {short_reasoning_limit}.
 - "result": "string" // Response is exactly one of: "yes" | "no", all lowercase

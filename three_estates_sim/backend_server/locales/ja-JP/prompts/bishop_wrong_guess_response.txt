@@ -1,0 +1,36 @@
+{PREFIX}
+
+ゲーム背景：
+{personal_context_msg}
+
+最近参加した会話：
+{recent_conversation}
+
+{current_table_events}
+{current_table_additional_context}
+{other_table_additional_context}
+
+反応直前の現在の座席と盤面：
+{current_table_context}
+
+Bishopの{bishop_name}は今、あなたの陣営を{guessed_family}と推測しました。しかし実際の役職は{actual_role}、陣営は{actual_family}です。
+自分の役職カード状態：{card_status}
+
+選択可能な反応：
+{hard_reveal_option}
+- `soft reveal`：カードを示さず、自分の正確な役職または陣営を口頭で主張する。
+- `no reveal`：明確な役職や陣営の主張を拒み、話をそらすか曖昧に保つ。
+
+これは誤推測への即時反応であり、長い演説ではありません。理想は1文、最大でも短い2文。理由の長さ制限：{short_reasoning_limit}。`hard reveal` なら、台詞と動作は実際にカードを示しているようにする。`soft reveal` なら口頭で何を主張するか明示するが、証明済みのようには扱わない。拒否するなら答えをうっかり漏らさない。ほかのテーブルに聞こえ得るのは `practically screaming` だけです。
+
+次の JSON だけを返してください。キー、人物名、すべての列挙値は英語／元表記のまま、自然言語値は日本語にします：
+
+{{
+  "reasoning": "選択理由を1～2文",
+  "response": "hard reveal、soft reveal、no reveal のいずれかを厳密に記入",
+  "object": "everyone または同じテーブルの人物の正確な名前",
+  "volume": "whisper、calm、loud、practically screaming のいずれか",
+  "expression": "1～3語",
+  "action": "人物名と末尾の句点を含まない、72文字未満の三人称動作",
+  "line": "即時の台詞"
+}}

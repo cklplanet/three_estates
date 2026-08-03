@@ -55,7 +55,7 @@ class Location:
         self.event_history.append(event_tuple)
         if log_event:
             write_table_event_log(self.name, event_tuple)
-            print(f"({self.name})" + event_tuple[2])
+            print(f"({display_name('table', self.name)})" + event_tuple[2])
     
     def add_table_dialogue(self, dialogue_tuple):
         if len(dialogue_tuple) == 6:
@@ -80,8 +80,10 @@ class Location:
         self.dialogue_history.append(dialogue_tuple)
         write_dialogue_log(self.name, dialogue_tuple)
         print(
-            f"({self.name}) {speaker} -> {target} "
-            f"[{volume}, {expression}]: {format_dialogue_payload(action, line)}"
+            f"({display_name('table', self.name)}) {speaker} -> "
+            f"{display_name('dialogue_target', target)} "
+            f"[{display_name('volume', volume)}, {expression}]: "
+            f"{format_transcript_dialogue_payload(action, line)}"
         )
 
 

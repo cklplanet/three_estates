@@ -32,5 +32,5 @@ Use exactly one of these bid values:
 - 8: urgent retrieval. Use this if you are desperate to retrieve your card now, if this person was literally the Baron who stole it and nothing you know suggests it moved elsewhere, or if your memories/observations indicate this person is currently where your card ended up.
 Return ONLY the json dict below.
 
-- "reasoning": "string",  // Explain in-character why retrieving now is or is not important in one or two sentences. Avoid violent or harmful language.
+- "reasoning": "string",  // Explain in-character why retrieving now is or is not important in one or two sentences. Length limit for the active language: {short_reasoning_limit}. Avoid violent or harmful language.
 - "bid": "integer" // exactly 0, 3, or 8

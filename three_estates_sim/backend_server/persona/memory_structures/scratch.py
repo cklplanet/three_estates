@@ -188,8 +188,8 @@ class Scratch:
     scratch["event_cursors"] = self.event_cursors
     scratch["endgame_role_guesses"] = self.endgame_role_guesses
 
-    with open(out_json, "w") as outfile:
-        json.dump(scratch, outfile, indent=2)
+    with open(out_json, "w", encoding="utf-8") as outfile:
+      json.dump(scratch, outfile, indent=2, ensure_ascii=False)
 
 
   def get_str_iss(self): 

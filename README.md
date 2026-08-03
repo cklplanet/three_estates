@@ -1,5 +1,7 @@
 # Three Estates
 
+[简体中文](README.md) | **English**
+
 Three Estates is a terminal-driven social-deduction simulator in which LLM-powered characters move between tables, converse, reveal information, use role abilities, form memories, and pursue individual win conditions.
 
 The simulator supports a 10-player base ruleset and a 16-player expanded ruleset. Each agent acts from incomplete information: it knows its own role and history, perceives activity at its current table, and can only overhear remote dialogue when the line is sufficiently loud. Retrieved memories, relationships, current game state, and table-specific timers are assembled into the prompts that drive each decision.
@@ -14,9 +16,11 @@ The simulator supports a 10-player base ruleset and a 16-player expanded ruleset
 - **Autonomous game loop** covering departures, action bidding, arrivals, role reveals, ability resolution, table lockdowns, and endgame scoring.
 - **Persistent character continuity** through reusable character profiles, directional relationships, game-specific context, and archived post-game summaries.
 - **Resumable execution** with stable game-state checkpoints, phase snapshots, and granular checkpoints throughout character generation.
+- **Roster-first character generation:** the complete name list is resolved from the initial context before any profiles are generated, with explicit character lists treated as authoritative.
 - **Configurable conversation styles:** strategic, casual-to-strategic, and ultra-casual.
 - **Separate model routing** for character generation, game reasoning, dialogue, poignancy scoring, and post-game writing.
 - **Structured output and debugging** through full logs, clean dialogue logs, per-table/per-character logs, game summaries, and visual-novel-style epilogues.
+- **Reusable localization packs** for English, Simplified Chinese, and Japanese.
 
 ## How a Game Works
 
@@ -128,19 +132,36 @@ Frequently adjusted settings include:
 | `OPENROUTER_KEY` | API key used for LLM requests |
 | `THREE_ESTATES_SESSION_NAME` | Session directory name under `three_estates_sim/sessions/` |
 | `THREE_ESTATES_SESSION_DIR` | Optional absolute path overriding the session-name directory |
+| `THREE_ESTATES_LOCALE` | Interface and generated-language locale: `en-US`, `zh-CN`, or `ja-JP` (experimental; proofreading needed) |
 | `THREE_ESTATES_GAME_MODE` | Default ruleset: `10` or `16` |
 | `THREE_ESTATES_CHARACTER_MODEL` | Character profile and cast generation |
 | `THREE_ESTATES_GAME_MODEL` | Movement, bidding, abilities, and strategic reasoning |
 | `THREE_ESTATES_DIALOGUE_MODEL` | Spoken-line, action, and expression generation |
+| `THREE_ESTATES_SPINSTER_GUESS_MODEL` | Spinster endgame guess; defaults to the dialogue model when unset |
 | `THREE_ESTATES_POIGNANCY_MODEL` | LLM-based memory-importance scoring |
 | `THREE_ESTATES_EPILOGUE_MODEL` | Post-game summary and epilogue generation |
 | `THREE_ESTATES_SECONDS_PER_PHASE` | Simulated time advanced during ordinary strategic phases |
 | `THREE_ESTATES_CASUAL_SECONDS_PER_PHASE` | Simulated time advanced during casual phases |
-| `THREE_ESTATES_SERVER_SLEEP_SECONDS` | Real-time delay between simulation phases |
 | `THREE_ESTATES_USE_LLM_CHAT_POIGNANCY_SCORING` | Enables LLM scoring in strategic play; casual conversation uses it by default |
 | `THREE_ESTATES_ALLOW_SPEECH_REASONING` | Allows the dialogue model's default reasoning behavior |
 
-Reducing the real-time sleep value makes games finish faster but may increase the rate at which API requests and filesystem checkpoints occur.
+### Localization
+
+Set `THREE_ESTATES_LOCALE=zh-CN` for Simplified Chinese or `ja-JP` for
+Japanese terminal text and generated dialogue. Locale packs live in
+`three_estates_sim/backend_server/locales/<locale>/`:
+
+- `strings.json` contains terminal labels, messages, and display names.
+- `prompts/` contains optional prompt overrides keyed by the original prompt
+  filename.
+- Missing strings and prompt overrides fall back to `en-US` and then to the
+  original English prompt template.
+
+Protocol identifiers remain canonical English internally, including saved JSON
+keys, role/family/table identifiers, and structured-output enum values. This
+keeps sessions portable between locales. To add another language, copy an
+existing locale directory, translate any desired strings or prompts, and set
+`THREE_ESTATES_LOCALE` to the new directory name.
 
 ## Sessions and Outputs
 
@@ -170,6 +191,9 @@ three_estates_sim/
 │   ├── server.py                     # Simulation orchestration and persistence
 │   ├── room.py                       # Tables, movement, and shared world state
 │   ├── utils.py                      # Rules, roles, timers, and configuration
+│   ├── character_generation.py       # Fixed-roster validation helpers
+│   ├── localization.py               # Locale selection and fallback handling
+│   ├── locales/                      # Terminal strings and prompt overrides
 │   └── persona/
 │       ├── persona.py                # Agent actions and role abilities
 │       ├── cognitive_modules/        # Perception, retrieval, planning, reflection

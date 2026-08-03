@@ -42,7 +42,6 @@ class ThreeEstatesServer:
         self.sec_per_step = 10
         self.casual_sec_per_step = CASUAL_SECONDS_PER_PHASE
         self.curr_time = datetime.timedelta(0)
-        self.server_sleep = 5
         self.session_id = None
         self.dialogue_log_path = None
         self.clean_dialogue_log_path = None
@@ -1502,7 +1501,6 @@ class ThreeEstatesServer:
             )
             self.generate_and_save_vn_epilogue(results)
             self.save_checkpoint("game_end")
-            time.sleep(self.server_sleep)
         except KeyboardInterrupt:
             print("\nKeyboard interrupt received. Stopping without saving a mid-timestep state.")
             if os.path.isfile(self.session_state_path()):

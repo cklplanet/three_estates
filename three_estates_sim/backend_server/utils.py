@@ -1,9 +1,12 @@
 import datetime
+import hashlib
 import os
 import re
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT, SESSIONS_ROOT
+from localization import display_name, protocol_display_name, tr
 
 def read_local_env_value(key):
     for env_path in (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env"):
@@ -27,7 +30,7 @@ def read_int_config(key, default):
     try:
         return int(raw_value)
     except ValueError:
-        print(f"Invalid integer for {key}: {raw_value!r}; using {default}.")
+        print(tr("terminal.invalid_integer", key=key, value=repr(raw_value), default=default))
         return default
 
 
@@ -42,6 +45,7 @@ OPENROUTER_KEY = os.getenv("OPENROUTER_KEY") or read_local_env_value("OPENROUTER
 CHARACTER_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_CHARACTER_MODEL") or read_local_env_value("THREE_ESTATES_CHARACTER_MODEL") or "openai/gpt-5.5"
 GAME_LOOP_LLM_MODEL = os.getenv("THREE_ESTATES_GAME_MODEL") or read_local_env_value("THREE_ESTATES_GAME_MODEL") or "openai/gpt-5.5"
 DIALOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_DIALOGUE_MODEL") or read_local_env_value("THREE_ESTATES_DIALOGUE_MODEL") or "openai/gpt-5.5"
+SPINSTER_GUESS_LLM_MODEL = os.getenv("THREE_ESTATES_SPINSTER_GUESS_MODEL") or read_local_env_value("THREE_ESTATES_SPINSTER_GUESS_MODEL") or DIALOGUE_GENERATION_LLM_MODEL
 EPILOGUE_GENERATION_LLM_MODEL = os.getenv("THREE_ESTATES_EPILOGUE_MODEL") or read_local_env_value("THREE_ESTATES_EPILOGUE_MODEL") or "openai/gpt-5.5"
 POIGNANCY_SCORING_LLM_MODEL = os.getenv("THREE_ESTATES_POIGNANCY_MODEL") or read_local_env_value("THREE_ESTATES_POIGNANCY_MODEL") or "openai/gpt-5.5"
 FALLBACK_LLM_MODEL = os.getenv("THREE_ESTATES_FALLBACK_MODEL") or read_local_env_value("THREE_ESTATES_FALLBACK_MODEL") or "openai/gpt-5.5"
@@ -110,13 +114,14 @@ CASUAL_SECONDS_PER_PHASE = max(
     read_int_config("THREE_ESTATES_CASUAL_SECONDS_PER_PHASE", SIM_SECONDS_PER_STEP),
 )
 ENDGAME_SECONDS_PER_PHASE = read_int_config("THREE_ESTATES_ENDGAME_SECONDS_PER_PHASE", 2.5 * SIM_SECONDS_PER_STEP)
-SERVER_SLEEP_SECONDS = read_int_config("THREE_ESTATES_SERVER_SLEEP_SECONDS", 5)
 PHASE_SNAPSHOT_RETENTION = max(1, read_int_config("THREE_ESTATES_PHASE_SNAPSHOT_RETENTION", 2))
 DIALOGUE_LOG_PATH = None
 CLEAN_DIALOGUE_LOG_PATH = None
 DEBUG_LOG_PATH = None
 TABLE_LOG_DIR = None
 CHARACTER_LOG_DIR = None
+CHARACTER_LOG_NAMES = set()
+CHARACTER_LOG_FILENAMES = {}
 GAME_MODE = "10"
 
 TIMER_CONFIGS = {
@@ -220,6 +225,45 @@ def role_count_summary(mode=None):
     return ", ".join(f"{role} x{counts[role]}" for role in ROLE_DICT.keys() if counts.get(role, 0))
 
 
+def role_family_glossary():
+    role_entries = [
+        protocol_display_name("role", role)
+        for role in ROLE_DICT
+    ]
+    families = dict.fromkeys(
+        role_data["family"] for role_data in ROLE_DICT.values()
+    )
+    family_entries = [
+        protocol_display_name("family", family)
+        for family in families
+    ]
+    return "; ".join(role_entries + family_entries)
+
+
+def localize_rulebook_terms(text):
+    rendered = str(text)
+    for role in sorted(ROLE_DICT, key=len, reverse=True):
+        localized = protocol_display_name("role", role)
+        if localized != role:
+            rendered = re.sub(
+                rf"(?<![A-Za-z]){re.escape(role)}(?![A-Za-z])",
+                localized,
+                rendered,
+            )
+    families = dict.fromkeys(
+        role_data["family"] for role_data in ROLE_DICT.values()
+    )
+    for family in sorted(families, key=len, reverse=True):
+        localized = protocol_display_name("family", family)
+        if localized != family:
+            rendered = re.sub(
+                rf"(?<![A-Za-z]){re.escape(family)}(?![A-Za-z])",
+                localized,
+                rendered,
+            )
+    return rendered
+
+
 def mode_label(mode=None):
     mode = str(mode or GAME_MODE)
     return "expanded 16-player mode" if mode == "16" else "base 10-player mode"
@@ -287,7 +331,7 @@ def build_prefix(mode=None):
         retrieval_lines.append(
             "- Baron-vs-Baron trophy theft does not create a Baron role-card retrieval claim, because the target Baron's own role card was not stolen."
         )
-    return (
+    rulebook = (
         "You are playing a digital version of a turn-based **social deduction game** involving secret roles, public actions, and table-based conversations.\n\n"
         "GAME RULES:\n"
         f"- Active ruleset: {mode_label(mode)}.\n"
@@ -307,6 +351,15 @@ def build_prefix(mode=None):
         + "\n".join(retrieval_lines)
         + "\n\nADDITIONAL NOTES:\n"
         "- Nun card protection takes the highest precedence, even over Farmer immunity. Even an ability-granted, non-stolen Nun card does NOT protect the Baron from having to return a stolen card when required to.\n"
+    )
+    localized_rulebook = localize_rulebook_terms(rulebook)
+    if localized_rulebook == rulebook:
+        return rulebook
+    return (
+        "LOCALIZED ROLE/FAMILY GLOSSARY "
+        "(canonical English protocol IDs are retained in parentheses):\n"
+        f"{role_family_glossary()}\n\n"
+        f"{localized_rulebook}"
     )
 
 
@@ -900,12 +953,10 @@ def prompt_text(prompt_result, default):
     return default
 
 
-def compact_summary_text(value, fallback="", max_chars=240):
-    text = " ".join(str(value or fallback or "").split())
-    if len(text) <= max_chars:
-        return text
-    trimmed = text[:max_chars].rsplit(" ", 1)[0].rstrip(".,;: ")
-    return f"{trimmed}."
+def compact_summary_text(value, fallback=""):
+    # Keep whitespace normalization, but do not truncate generated reasoning.
+    # Length policy is handled by the language-aware prompts.
+    return " ".join(str(value or fallback or "").split())
 
 
 def bounded_int(value, default, allowed=None, minimum=None, maximum=None):
@@ -922,14 +973,20 @@ def bounded_int(value, default, allowed=None, minimum=None, maximum=None):
     return parsed
 
 
-def set_dialogue_log_path(path, log_dir=None):
+def set_dialogue_log_path(path, log_dir=None, character_names=None):
     global DIALOGUE_LOG_PATH
     DIALOGUE_LOG_PATH = Path(path)
     DIALOGUE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(DIALOGUE_LOG_PATH, "a") as outfile:
-        outfile.write(f"# Three Estates table log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
+    with open(DIALOGUE_LOG_PATH, "a", encoding="utf-8") as outfile:
+        outfile.write(
+            tr(
+                "log.table_started",
+                timestamp=datetime.datetime.now().isoformat(timespec="seconds"),
+            )
+            + "\n"
+        )
     if log_dir:
-        set_advanced_log_dirs(Path(log_dir))
+        set_advanced_log_dirs(Path(log_dir), character_names=character_names)
 
 
 def set_clean_dialogue_log_path(path):
@@ -947,16 +1004,41 @@ def set_debug_log_path(path):
         outfile.write(f"# Three Estates debug log started at {datetime.datetime.now().isoformat(timespec='seconds')}\n")
 
 
-def set_advanced_log_dirs(log_dir):
+def set_advanced_log_dirs(log_dir, character_names=None):
     global TABLE_LOG_DIR, CHARACTER_LOG_DIR
     TABLE_LOG_DIR = Path(log_dir) / "tables"
     CHARACTER_LOG_DIR = Path(log_dir) / "characters"
     TABLE_LOG_DIR.mkdir(parents=True, exist_ok=True)
     CHARACTER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    configure_character_logs(character_names or [])
 
 
 def safe_log_filename(name):
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(name)).strip("_") or "unknown"
+    normalized = unicodedata.normalize("NFC", str(name))
+    return re.sub(r"[^\w.-]+", "_", normalized).strip("_.-") or "unknown"
+
+
+def configure_character_logs(character_names):
+    global CHARACTER_LOG_NAMES, CHARACTER_LOG_FILENAMES
+    CHARACTER_LOG_NAMES = {
+        str(name) for name in character_names if str(name).strip()
+    }
+    CHARACTER_LOG_FILENAMES = {}
+    used_filenames = {}
+    for name in sorted(CHARACTER_LOG_NAMES):
+        filename = safe_log_filename(name)
+        if filename in used_filenames and used_filenames[filename] != name:
+            suffix = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+            filename = f"{filename}_{suffix}"
+        used_filenames[filename] = name
+        CHARACTER_LOG_FILENAMES[name] = filename
+
+
+def character_log_path(character):
+    filename = CHARACTER_LOG_FILENAMES.get(str(character))
+    if CHARACTER_LOG_DIR is None or filename is None:
+        return None
+    return CHARACTER_LOG_DIR / f"{filename}.log"
 
 
 def append_table_specific_log(table_name, line):
@@ -979,19 +1061,22 @@ def append_all_table_specific_logs(line, exclude_table=None):
 def append_character_specific_log(characters, line):
     if CHARACTER_LOG_DIR is None:
         return
-    for character in sorted(str(c) for c in characters if c and c != "everyone" and c != "system"):
-        with open(CHARACTER_LOG_DIR / f"{safe_log_filename(character)}.log", "a") as outfile:
+    targets = CHARACTER_LOG_NAMES & {
+        str(character) for character in characters if character
+    }
+    for character in sorted(targets):
+        with open(character_log_path(character), "a", encoding="utf-8") as outfile:
             outfile.write(line + "\n")
 
 
 def append_all_character_specific_logs(line, exclude_characters=None):
     if CHARACTER_LOG_DIR is None:
         return
-    exclude_names = {safe_log_filename(character) for character in (exclude_characters or [])}
-    for character_log in sorted(CHARACTER_LOG_DIR.glob("*.log")):
-        if character_log.stem in exclude_names:
+    exclude_names = {str(character) for character in (exclude_characters or [])}
+    for character in sorted(CHARACTER_LOG_NAMES):
+        if character in exclude_names:
             continue
-        with open(character_log, "a") as outfile:
+        with open(character_log_path(character), "a", encoding="utf-8") as outfile:
             outfile.write(line + "\n")
 
 
@@ -1016,14 +1101,21 @@ def write_table_event_log(table_name, event_tuple):
         audience = None
     subject = subject or "system"
     obj = obj or "everyone"
+    subject_label = display_name("event_actor", subject)
+    if obj in {"Nobility", "Commoners", "Clergy"}:
+        obj_label = display_name("family", obj)
+    else:
+        obj_label = display_name("dialogue_target", obj)
     keyword_text = ", ".join(sorted(str(keyword) for keyword in keywords)) if keywords else ""
+    table_label = display_name("table", table_name)
+    event_label = tr("log.event")
     if DIALOGUE_LOG_PATH is not None:
-        with open(DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}")
+        with open(DIALOGUE_LOG_PATH, "a", encoding="utf-8") as outfile:
+            outfile.write(f"[{timestamp}] {event_label} ({table_label}) {subject_label} -> {obj_label}: {description}")
             if keyword_text:
                 outfile.write(f" | keywords={keyword_text}")
             outfile.write("\n")
-    advanced_line = f"[{timestamp}] EVENT ({table_name}) {subject} -> {obj}: {description}"
+    advanced_line = f"[{timestamp}] {event_label} ({table_label}) {subject_label} -> {obj_label}: {description}"
     if keyword_text:
         advanced_line += f" | keywords={keyword_text}"
     append_table_specific_log(table_name, advanced_line)
@@ -1032,8 +1124,8 @@ def write_table_event_log(table_name, event_tuple):
         character_log_targets.discard(subject)
     append_character_specific_log(character_log_targets, advanced_line)
     if CLEAN_DIALOGUE_LOG_PATH is not None:
-        with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] EVENT ({table_name}): {description}\n")
+        with open(CLEAN_DIALOGUE_LOG_PATH, "a", encoding="utf-8") as outfile:
+            outfile.write(f"[{timestamp}] {event_label} ({table_label}): {description}\n")
 
 
 def normalize_dialogue_expression(expression):
@@ -1063,9 +1155,9 @@ def visual_character_label(persona):
         getattr(getattr(persona, "scratch", None), "clothing", ""),
         70,
     )
-    label = f"{name}, appearance: {appearance}"
+    label = tr("prompt.visual_appearance", name=name, appearance=appearance)
     if clothing:
-        label += f", wearing {clothing}"
+        label += tr("prompt.visual_clothing", clothing=clothing)
     return label
 
 
@@ -1117,28 +1209,67 @@ def format_dialogue_payload(action, line):
     return f"({normalize_dialogue_action(action)}) {line}"
 
 
+_CANONICAL_CARD_ROLES = (
+    "Innkeeper",
+    "Spinster",
+    "Bishop",
+    "Priest",
+    "Farmer",
+    "Baron",
+    "Thief",
+    "Queen",
+    "King",
+    "Nun",
+)
+
+
+def localize_transcript_natural_text(text):
+    """Localize leaked canonical card names only at transcript render time."""
+    rendered = str(text)
+    for role in _CANONICAL_CARD_ROLES:
+        rendered = re.sub(
+            rf"(?<![A-Za-z])\s*{re.escape(role)}\s*(?:card|カード|卡牌|卡|牌)",
+            display_name("role_card", role),
+            rendered,
+            flags=re.IGNORECASE,
+        )
+    return rendered
+
+
+def format_transcript_dialogue_payload(action, line):
+    action = localize_transcript_natural_text(normalize_dialogue_action(action))
+    line = localize_transcript_natural_text(line)
+    return f"({action}) {line}"
+
+
 def write_dialogue_log(table_name, dialogue_tuple):
     if DIALOGUE_LOG_PATH is None and CLEAN_DIALOGUE_LOG_PATH is None:
         return
     speaker, target, volume, expression, action, line, timestamp, audience, _keywords = unpack_dialogue_fields(dialogue_tuple)
-    audience_text = ", ".join(sorted(str(player) for player in audience)) if audience else "unknown"
-    rendered_line = format_dialogue_payload(action, line)
+    audience_text = ", ".join(sorted(str(player) for player in audience)) if audience else tr("log.unknown")
+    rendered_line = format_transcript_dialogue_payload(action, line)
+    table_label = display_name("table", table_name)
+    volume_label = display_name("volume", volume)
+    target_label = display_name("dialogue_target", target)
+    dialogue_label = tr("log.dialogue")
+    audience_label = tr("log.audience")
     if DIALOGUE_LOG_PATH is not None:
-        with open(DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]\n")
-    advanced_line = f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]"
+        with open(DIALOGUE_LOG_PATH, "a", encoding="utf-8") as outfile:
+            outfile.write(f"[{timestamp}] {dialogue_label} ({table_label}) {speaker} -> {target_label} [{volume_label}, {expression}]: {rendered_line} | {audience_label}=[{audience_text}]\n")
+    advanced_line = f"[{timestamp}] {dialogue_label} ({table_label}) {speaker} -> {target_label} [{volume_label}, {expression}]: {rendered_line} | {audience_label}=[{audience_text}]"
     append_table_specific_log(table_name, advanced_line)
     append_character_specific_log(set(audience or []) | {speaker, target}, advanced_line)
     if volume == "practically screaming":
+        overheard_rendered_line = localize_transcript_natural_text(line)
         overheard_line = (
-            f"[{timestamp}] DIALOGUE (overheard from {table_name}) {speaker} -> {target} "
-            f"[{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]"
+            f"[{timestamp}] {dialogue_label} ({tr('log.overheard_from', table=table_label)}) {speaker} -> {target_label} "
+            f"[{volume_label}]: {overheard_rendered_line} | {audience_label}=[{audience_text}]"
         )
         append_all_table_specific_logs(overheard_line, exclude_table=table_name)
         append_all_character_specific_logs(overheard_line, exclude_characters=set(audience or []) | {speaker, target})
     if CLEAN_DIALOGUE_LOG_PATH is not None:
-        with open(CLEAN_DIALOGUE_LOG_PATH, "a") as outfile:
-            outfile.write(f"[{timestamp}] DIALOGUE ({table_name}) {speaker} -> {target} [{volume}, {expression}]: {rendered_line} | audience=[{audience_text}]\n")
+        with open(CLEAN_DIALOGUE_LOG_PATH, "a", encoding="utf-8") as outfile:
+            outfile.write(f"[{timestamp}] {dialogue_label} ({table_label}) {speaker} -> {target_label} [{volume_label}, {expression}]: {rendered_line} | {audience_label}=[{audience_text}]\n")
 
 
 def debug_bid(persona, table, action, bid, reasoning):
@@ -1205,8 +1336,17 @@ def role_keywords_from_text(text):
         if re.search(rf"(?<!\w){re.escape(role.lower())}(?!\w)", lower):
             keywords.add(role)
             keywords.add(role_data["family"])
+        localized_role = display_name("role", role).casefold()
+        if localized_role != role.casefold() and localized_role in lower:
+            keywords.add(role)
+            keywords.add(role_data["family"])
     for family in {"Nobility", "Commoners", "Clergy"}:
-        if family.lower() in lower or family.rstrip("s").lower() in lower:
+        localized_family = display_name("family", family).casefold()
+        if (
+            family.lower() in lower
+            or family.rstrip("s").lower() in lower
+            or (localized_family != family.casefold() and localized_family in lower)
+        ):
             keywords.add(family)
     return keywords
 
@@ -1226,6 +1366,10 @@ def event_role_keywords_from_text(text):
         if any(re.search(pattern, lower) for pattern in role_patterns):
             keywords.add(role)
             keywords.add(role_data["family"])
+        localized_role = display_name("role", role).casefold()
+        if localized_role != role.casefold() and localized_role in lower:
+            keywords.add(role)
+            keywords.add(role_data["family"])
     for family in {"Nobility", "Commoners", "Clergy"}:
         family_lower = family.lower()
         family_singular = family_lower.rstrip("s")
@@ -1237,6 +1381,9 @@ def event_role_keywords_from_text(text):
             rf"\b{re.escape(family_singular)}\s+claim\b",
         ]
         if any(re.search(pattern, lower) for pattern in family_patterns):
+            keywords.add(family)
+        localized_family = display_name("family", family).casefold()
+        if localized_family != family.casefold() and localized_family in lower:
             keywords.add(family)
     return keywords
 
