@@ -123,7 +123,7 @@ The terminal will guide you through game size, character generation, conversatio
 
 ## Configuration
 
-The application reads ordinary environment variables first, followed by `.env.local` and `.env`. See [`.env.example`](.env.example) for the complete starter configuration. The model combination currently provided in `.env.example` has so far been tested as yielding optimal runtime, cost, as well as the tradeoff between both.
+The application reads ordinary environment variables first, followed by `.env.local` and `.env`. See [`.env.example`](.env.example) for the complete starter configuration. The model combination currently provided in `.env.example` has so far been tested as yielding optimal runtime, cost, reasoning fidelity, and the tradeoff between all three.
 
 Frequently adjusted settings include:
 
