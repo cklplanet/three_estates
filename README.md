@@ -59,7 +59,7 @@ The 10-player base game contains exactly one of each role. A player's **role**, 
 | **Bishop** | Clergy | After another player leaves, may guess the family of a remaining player. A correct guess forces that target to leave; an incorrect guess lets the target decide how much, if anything, to reveal in response. | Wins if no Nobles are seated at the Bishop's final table. |
 | **Priest** | Clergy | When alone with exactly one other player, may inspect that player's role. The attempt fails if the target no longer possesses their own role card. | Wins if no more than one person is in the Forest. |
 | **Nun** | Clergy | When alone with exactly one other player, may give that player the Nun card. Its holder is protected from most hostile abilities until the card is returned, and must return a Nun's own card when that Nun requests it. | Wins if at least three Commoners win. |
-| **Spinster** | Commoners | When leaving the Forest, may mark one player remaining there. After the Spinster departs, that player must reveal their role to everyone else still in the Forest. | At game end, guesses every other role at the Spinster's final table. If every guess is correct, the win/loss results of all other players at that table are reversed. |
+| **Spinster** | Commoners | When leaving the Forest, may mark one player remaining there. After the Spinster departs, that player must reveal their role to everyone else still in the Forest. | At game end, guesses every other role at the Spinster's final table. If every guess is correct, the win/loss results of all other players at that table are reversed. If there is no other player at that table, the Spinster trivially wins without making any guesses. |
 | **Farmer** | Commoners | Immune to most other role abilities. Exceptions include receiving Nun protection, direct reveals caused by Priest or Spinster, and the Spinster's endgame reversal. The Farmer may reveal the Farmer card when proof of immunity is required. | Wins if seated with at least two Clergy members. |
 | **Thief** | Commoners | When alone with exactly one other player, may swap roles and win conditions with that player. A Thief cannot swap with someone who lacks their own role card, cannot target another Thief, and cannot immediately reverse the same one-on-one swap before the table state changes. | Wins if every non-Thief in the Village loses, or if no such player exists. |
 | **Innkeeper** | Commoners | Upon entering the Village from another table, may reveal and declare as Innkeeper. If activated, nobody can leave the Village until the Innkeeper leaves or another player enters. Merely starting in or remaining in the Village does not activate it. | Wins if seated with at least two Nobles. |
@@ -83,7 +83,7 @@ No win condition directly names the Wilderness. Its purpose is to create additio
 
 - Python 3.9 or newer
 - An [OpenRouter](https://openrouter.ai/) API key
-- Internet access on first run to download the `all-MiniLM-L6-v2` sentence-transformer model
+- Internet access on first run to download the `paraphrase-multilingual-MiniLM-L12-v2` sentence-transformer model
 - Access through OpenRouter to the model IDs configured in your environment file
 
 ## Quick Start
@@ -179,6 +179,14 @@ A session can contain:
 - Immutable phase snapshots
 - Full, clean, table-specific, and character-specific dialogue logs
 - A generated post-game epilogue
+
+For the cleanest real-time view of a running session, open the newest file matching
+`dialogue_logs/dialogue_clean_<session-id>_<timestamp>.log` inside the current
+session directory (often referred to simply as `dialogue_clean.log`). The simulator
+appends rendered dialogue and system events to this file as the game runs, without
+the model responses, bidding diagnostics, perception traces, and checkpoint noise
+found in the full debug log. You can also follow it from a terminal with
+`tail -f <path-to-the-current-dialogue_clean_*.log>`.
 
 Session directories and `.env.local` are intentionally ignored by Git because they may contain private prompts, generated dialogue, and credentials.
 

@@ -3,7 +3,8 @@
 游戏背景：
 {personal_context_msg}
 
-所有计时器均已结束。你是纺纱女（内部协议角色值为 `Spinster`）；在计算胜负前，你必须猜测最终与你同桌的每一名其他玩家的角色。
+所有计时器均已结束。你是{glossary_role_Spinster}（内部协议角色值为 `Spinster`）；在计算胜负前，你必须猜测最终与你同桌的每一名其他玩家的角色。
+如果最终桌位没有其他玩家，则无需作出任何猜测，并直接满足{glossary_role_Spinster}的胜利条件。
 
 必须猜测的玩家：
 {target_list}

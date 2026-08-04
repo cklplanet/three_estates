@@ -20,7 +20,7 @@ You must fill out the below dictionary, formatted exactly like below with no emp
 name:
 gender: male or female, all lower case
 age: integer; normally use a plausible human age, but if the context clearly calls for fantasy, immortal, ancient, artificial, cosmic, or otherwise nonhuman characters, unusual ages are allowed
-innate: (one paragraph or two in third person. Length limit for the active language: {innate_profile_limit}. Explain their background in the broader context and core personality, especially related to dialogue, chain of thought, temperament, or degree of suspicion.)
+innate: (one or two paragraphs in third person. Length limit for the active language: {innate_profile_limit}. Cover exactly two kinds of durable information: (1) the character's own personal history and present personal status, including established relationships when relevant; and (2) their stable personality specifically as it would manifest while playing a social-deduction game, such as speaking style, reasoning habits, temperament, bluffing style, social boldness, and degree of suspicion. Use the supplied group context only to identify the character and recover durable canonical facts. Do NOT absorb temporary scenario framing into the profile: do not say that they joined this particular game, are currently at its venue, are meeting or already know this particular cast, feel awkward around these particular participants, occupy a current seat or role, or are reacting to any other circumstance created solely by the input game context. Describe stable tendencies rather than one-game circumstances. Do not include appearance or clothing.)
 
 Required JSON shape:
 {{

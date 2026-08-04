@@ -149,6 +149,28 @@ class CharacterRosterTests(unittest.TestCase):
         self.assertIn("{innate_profile_limit}", persona_prompt)
         self.assertIn("{relationship_limit}", relationship_prompt)
 
+    def test_persona_prompts_exclude_temporary_game_scenario_facts(self):
+        prompt_paths = {
+            "en": (
+                BACKEND_ROOT
+                / "persona"
+                / "prompt_template"
+                / "templates"
+                / "generate_persona.txt"
+            ),
+            "zh": BACKEND_ROOT / "locales" / "zh-CN" / "prompts" / "generate_persona.txt",
+            "ja": BACKEND_ROOT / "locales" / "ja-JP" / "prompts" / "generate_persona.txt",
+        }
+        expected_rules = {
+            "en": ("personal history", "social-deduction game", "temporary scenario"),
+            "zh": ("个人经历", "社交推理游戏", "临时场景"),
+            "ja": ("個人的な来歴", "社会的推理ゲーム", "一時的なシナリオ"),
+        }
+        for locale, path in prompt_paths.items():
+            prompt = path.read_text(encoding="utf-8")
+            for rule in expected_rules[locale]:
+                self.assertIn(rule, prompt, f"{locale}: {rule}")
+
     def test_preserves_supplied_order_and_spelling(self):
         result = normalize_character_name_roster(
             {"names": ["Peko Pekoyama", "Nagito Komaeda", "Chiaki Nanami"]},

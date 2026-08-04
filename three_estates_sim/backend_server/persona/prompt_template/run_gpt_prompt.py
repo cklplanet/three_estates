@@ -19,6 +19,7 @@ from localization import (
   localized_prompt_data,
   localized_prompt_path,
   prompt_language_instruction,
+  validate_localized_natural_language_fields,
 )
 from persona.prompt_template.gpt_structure import *
 # from persona.prompt_template.print_prompt import *
@@ -48,6 +49,10 @@ def json_cleanup(output):
     if not isinstance(parsed, dict):
       raise ValueError("Parsed LLM output is not a dictionary")
     return parsed
+
+
+def localized_dialogue_json_cleanup(output):
+  return validate_localized_natural_language_fields(json_cleanup(output))
 
 
 def text_cleanup(output):
@@ -555,7 +560,7 @@ def run_gpt_prompt_generate_next_convo_line_normal(persona, table, test_input=No
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
-    func_clean_up=json_cleanup,
+    func_clean_up=localized_dialogue_json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
     reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
@@ -591,7 +596,7 @@ def run_gpt_prompt_generate_next_convo_line_special(persona, table, special_circ
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
-    func_clean_up=json_cleanup,
+    func_clean_up=localized_dialogue_json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
     reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
@@ -751,11 +756,36 @@ def run_gpt_prompt_act_bidding_unified(persona, table, action_options, action_co
     )
   elif persona.scratch.role in {"Queen", "Spinster"}:
     data["ability_bid_action_clarification"] = f"Timing note for this movement-based ability: {movement_duration_hint(persona)}"
+
+  action_rules = {
+    "none": "Do not take the table's attention right now.",
+    "speak": (
+      "Only talk, ask, answer, bluff, soft-claim, accuse, joke, negotiate, promise, agree, refuse, or pressure without hard proof. "
+      "Speaking may ask for or promise a future card return, but it cannot physically hand over, return, retrieve, steal, or otherwise transfer a card. "
+      "A spoken request is not the formal card-retrieval action; formal retrieval begins only when a system EVENT says either "
+      "`the Nun REQUESTER asks HOLDER to return the Nun card and end the protection.` or "
+      "`REQUESTER asks HOLDER whether they can return POSSESSIVE ROLE card after a Baron theft.` "
+      "Only 'practically screaming', not merely 'loud', can be heard by other tables or people in transit. "
+      "When it comes naturally, vary the exact topic from your own most recent spoken line; you may switch topics or extend the previous topic to keep the conversation alive."
+    ),
+    "reveal": (
+      "Reveal your own actual role card without using your ability. This is neither a Nun-protection reveal nor an ability attempt. "
+      "If the eventual reveal line is 'practically screaming', the reveal is visible to all tables, but only Barons physically at this table can react."
+    ),
+    "nun-reveal": "Show a Nun card protecting you without revealing your actual private role card.",
+    "ability": (
+      "Reveal your own role card and try to use your role ability. "
+      f"Additional role-specific ability note: {data['ability_bid_action_clarification']}"
+    ),
+    "retrieve": "Spend attention trying one of the currently valid formal card-retrieval pathways.",
+  }
   option_lines = []
   for option in action_options:
     score_text = " | ".join(str(score) for score in option["scores"])
+    action = option["action"]
+    action_rule = action_rules.get(action, "Choose this currently available action.")
     option_lines.append(
-      f"- {option['action']}: {option['description']} Allowed bid scores: {score_text}."
+      f"- {action}: {action_rule} Score guidance: {option['description']} Allowed bid scores: {score_text}."
     )
   data["action_options"] = "\n".join(option_lines) or "- none: take no action. Allowed bid scores: 0."
 
@@ -1216,7 +1246,7 @@ def run_gpt_prompt_bishop_wrong_guess_response(persona, bishop, guessed_family, 
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
-    func_clean_up=json_cleanup,
+    func_clean_up=localized_dialogue_json_cleanup,
     model=DIALOGUE_GENERATION_LLM_MODEL,
     reasoning_effort=None if ALLOW_SPEECH_REASONING else "none",
   )
@@ -1246,7 +1276,7 @@ def run_gpt_prompt_spinster_endgame_guess(persona, table, test_input=None, verbo
 
   output = ChatGPT_safe_generate_response_full(
     final_prompt,
-    func_clean_up=json_cleanup,
+    func_clean_up=localized_dialogue_json_cleanup,
     model=SPINSTER_GUESS_LLM_MODEL,
   )
   if output != False:

@@ -70,7 +70,11 @@ def bid(persona, table, action_context=""):
   persona.scratch.current_bidding_reasonings = dict()
 
   def can_bid_ability():
-    if not has_own_role_card(persona, role) or table_size <= 1:
+    if not has_own_role_card(persona, role):
+      return False
+    # Innkeeper's bid is a departure for the Village, not a targeted table
+    # ability, so it remains valid even when the Innkeeper is alone.
+    if table_size <= 1 and role != "Innkeeper":
       return False
     return (
       (role == "Innkeeper" and table.name != "Village" and not table.timer_expired) or

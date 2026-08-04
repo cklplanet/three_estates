@@ -25,7 +25,7 @@ import uuid
 import zipfile
 from collections import Counter
 from paths import FRONTEND_SERVER_ROOT
-from localization import ACTIVE_LOCALE, display_name, tr
+from localization import ACTIVE_LOCALE, display_name, localized_string_variants, tr
 from character_generation import normalize_character_name_roster
 
 
@@ -2641,28 +2641,62 @@ class ThreeEstatesServer:
             self.initial_character_context_from_payload(context_payload)
         )
         return (
-            "INITIAL CHARACTER CONTEXT:\n"
-            + (initial_context or "No initial character context was provided.")
+            tr("context.initial_header")
+            + "\n"
+            + (initial_context or tr("context.no_initial"))
         )
+
+    def runtime_context_marker_values(self, key):
+        values = localized_string_variants(key)
+        if key == "context.current_game_header":
+            values.update({
+                "ADDITIONAL CHARACTER/SCENARIO CONTEXT FOR THIS GAME ONLY:",
+                "ADDITIONAL SCENARIO CONTEXT FOR THE CURRENT GAME/SESSION:",
+            })
+        return {value for value in values if value}
+
+    def normalize_runtime_context_sections(self, context):
+        initial_headers = self.runtime_context_marker_values("context.initial_header")
+        current_headers = self.runtime_context_marker_values("context.current_game_header")
+        priority_lines = self.runtime_context_marker_values("context.current_game_priority")
+        active_initial_header = tr("context.initial_header")
+        active_current_header = tr("context.current_game_header")
+        active_priority = tr("context.current_game_priority")
+        normalized_lines = []
+        for line in str(context or "").splitlines():
+            stripped = line.strip()
+            if stripped in initial_headers:
+                normalized_lines.append(active_initial_header)
+            elif stripped in current_headers:
+                normalized_lines.extend([active_current_header, active_priority])
+            elif stripped in priority_lines:
+                continue
+            else:
+                normalized_lines.append(line)
+        return "\n".join(normalized_lines).strip()
 
     def strip_previous_game_summaries_from_runtime_context(self, context):
         lines = str(context or "").splitlines()
         cleaned_lines = []
         skipping_summary = False
-        additional_context_header = "ADDITIONAL CHARACTER/SCENARIO CONTEXT FOR THIS GAME ONLY:"
+        current_context_headers = self.runtime_context_marker_values(
+            "context.current_game_header"
+        )
         for line in lines:
             if line.startswith("SUMMARY OF PREVIOUS GAME "):
                 skipping_summary = True
                 continue
             if skipping_summary:
-                if line.strip() == additional_context_header:
+                if line.strip() in current_context_headers:
                     skipping_summary = False
                     while cleaned_lines and not cleaned_lines[-1].strip():
                         cleaned_lines.pop()
-                    cleaned_lines.extend(["", additional_context_header])
+                    cleaned_lines.extend(["", tr("context.current_game_header")])
                 continue
             cleaned_lines.append(line)
-        return "\n".join(cleaned_lines).strip()
+        return self.normalize_runtime_context_sections(
+            "\n".join(cleaned_lines)
+        )
 
     def prompt_for_previous_game_context_carryover(self, context_payload):
         while True:
@@ -2680,7 +2714,8 @@ class ThreeEstatesServer:
             return reusable_context
         return (
             f"{str(reusable_context or '').rstrip()}\n\n"
-            "ADDITIONAL CHARACTER/SCENARIO CONTEXT FOR THIS GAME ONLY:\n"
+            f"{tr('context.current_game_header')}\n"
+            f"{tr('context.current_game_priority')}\n"
             f"{additional_context}"
         ).strip()
 

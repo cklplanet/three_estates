@@ -26,16 +26,8 @@ Given that {stay_at_table_reason}, and optionally considering {last_act_reasonin
 Your actual role ability status:
 {ability_msg}
 
-Available action options:
+Available action options and their complete rules (actions absent from this list are unavailable right now):
 {action_options}
-
-General meanings:
-- none: do not take the table's attention right now.
-- speak: only talk, ask, answer, bluff, soft-claim, accuse, joke, negotiate, promise, agree, refuse, or pressure without hard proof. Speaking may ask for or promise a future card return, but it cannot physically hand over, return, retrieve, steal, or otherwise transfer a card. A spoken request is not the formal card-retrieval action; formal retrieval begins only when a system EVENT says either `the Nun REQUESTER asks HOLDER to return the Nun card and end the protection.` or `REQUESTER asks HOLDER whether they can return POSSESSIVE ROLE card after a Baron theft.` Only "practically screaming", not merely "loud", can be heard by other tables or people in transit. For speaking bids in particular, when it comes naturally, try to vary the exact topic from your own most recent spoken line; you are allowed to switch to new or extension of previous topics from what you were saying to keep the convo alive.
-- reveal: reveal your own actual role card without using your ability. This is not a Nun-protection reveal and not an ability attempt. If your eventual reveal line is "practically screaming", the reveal is visible to all tables, but only Barons physically at this table can react.
-- nun-reveal: show a Nun card protecting you without revealing your actual private role card.
-- ability: reveal your own role card and try to use your role ability. Additional role-specific ability note, if relevant: {ability_bid_action_clarification}
-- retrieve: spend attention trying to retrieve a card through one of the currently valid retrieval pathways.
 
 Pick the action and bid score that best match your current urgency. Do not choose an action whose conditions are not listed as available.
 - Current table leave timer status: {table_time_left}
@@ -46,5 +38,5 @@ Pick the action and bid score that best match your current urgency. Do not choos
 return ONLY the json dict below (in proper python json format with brackets) with those exact fields and without the comments.
 
 - "reasoning": "string"  // Explain in-character why this single action is the one you most want right now in one or two sentences. Length limit for the active language: {short_reasoning_limit}. Tone not restricted; be as truthful to the character's raw thoughts as possible.
-- "action": "string"     // exactly one available action id, such as "none", "speak", "reveal", "nun-reveal", "ability", or "retrieve"
+- "action": "string"     // exactly one action id appearing in the available-action list above; never output an absent action
 - "bid": "string"        // exactly one of the allowed bid scores for that chosen action

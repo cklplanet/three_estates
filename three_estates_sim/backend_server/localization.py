@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -66,6 +67,16 @@ def locale_chain(locale=None):
     return candidates
 
 
+def available_locales():
+    return tuple(
+        sorted(
+            path.name
+            for path in LOCALES_ROOT.iterdir()
+            if path.is_dir() and (path / "strings.json").is_file()
+        )
+    )
+
+
 @lru_cache(maxsize=None)
 def _load_strings(locale):
     path = LOCALES_ROOT / locale / "strings.json"
@@ -86,10 +97,62 @@ def tr(key, default=None, locale=None, **kwargs):
             break
     else:
         value = default if default is not None else key
+    format_data = {**glossary_format_data(locale), **kwargs}
     try:
-        return str(value).format(**kwargs)
+        return str(value).format(**format_data)
     except (KeyError, IndexError, ValueError):
         return str(value)
+
+
+def localized_string_variants(key):
+    """Return every installed locale's rendered value for a string key."""
+    return {
+        tr(key, locale=locale).strip()
+        for locale in available_locales()
+        if tr(key, locale=locale).strip()
+    }
+
+
+@lru_cache(maxsize=None)
+def _glossary_format_data_for_locale(locale):
+    """Expose every display.* entry as a reusable string-format variable.
+
+    For example, ``display.role.Spinster`` becomes
+    ``{glossary_role_Spinster}``, while ``{glossary_role_card_Spinster}``
+    is derived through ``display.role_card_format``. Locale packs can therefore
+    define a role once and reuse it in terminal messages, events, and prompts.
+    """
+    display_entries = {}
+    for candidate in reversed(locale_chain(locale)):
+        display_entries.update(
+            (key, value)
+            for key, value in _load_strings(candidate).items()
+            if key.startswith("display.")
+        )
+    format_data = {
+        "glossary_" + key.removeprefix("display.").replace(".", "_"): value
+        for key, value in display_entries.items()
+    }
+    role_card_format = display_entries.get(
+        "display.role_card_format",
+        "{role} card",
+    )
+    for key, role in display_entries.items():
+        if not key.startswith("display.role."):
+            continue
+        canonical = key.removeprefix("display.role.")
+        format_data[f"glossary_role_card_{canonical}"] = role_card_format.format(
+            role=role
+        )
+    return format_data
+
+
+def glossary_format_data(locale=None):
+    return dict(
+        _glossary_format_data_for_locale(
+            normalize_locale(locale or ACTIVE_LOCALE)
+        )
+    )
 
 
 def localized_prompt_path(prompt_template, locale=None):
@@ -112,6 +175,7 @@ def prompt_language_instruction(locale=None):
 def localized_prompt_data(data, locale=None):
     """Add reusable locale-specific policy fragments to prompt format data."""
     return {
+        **glossary_format_data(locale),
         **data,
         "short_reasoning_limit": tr(
             "prompt.limit.short_reasoning",
@@ -132,7 +196,56 @@ def localized_prompt_data(data, locale=None):
     }
 
 
+def validate_localized_natural_language_fields(
+    payload,
+    fields=("reasoning", "expression", "action", "line"),
+    locale=None,
+):
+    """Reject conspicuously English prose in Chinese/Japanese structured output.
+
+    Protocol fields and character-name fields are intentionally not inspected.
+    A small amount of Latin text remains allowed for names such as C.C. and
+    ordinary mixed-script Japanese/Chinese prose.
+    """
+    locale = normalize_locale(locale or ACTIVE_LOCALE)
+    if locale == DEFAULT_LOCALE:
+        return payload
+    if not locale.startswith(("zh", "ja")):
+        return payload
+
+    leaked_fields = []
+    for field in fields:
+        if field not in payload or payload[field] is None:
+            continue
+        value = str(payload[field])
+        latin_count = len(re.findall(r"[A-Za-z]", value))
+        localized_count = len(
+            re.findall(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]", value)
+        )
+        if (
+            latin_count >= 4
+            and localized_count == 0
+        ) or (
+            latin_count >= 8
+            and latin_count > localized_count * 2
+        ):
+            leaked_fields.append(field)
+    if leaked_fields:
+        raise ValueError(
+            "Localized natural-language fields are predominantly English: "
+            + ", ".join(leaked_fields)
+        )
+    return payload
+
+
 def display_name(kind, canonical, locale=None):
+    if kind == "role_card":
+        return tr(
+            "display.role_card_format",
+            default="{role} card",
+            locale=locale,
+            role=display_name("role", canonical, locale=locale),
+        )
     return tr(
         f"display.{kind}.{canonical}",
         default=str(canonical),

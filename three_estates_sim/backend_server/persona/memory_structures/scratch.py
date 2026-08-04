@@ -219,7 +219,7 @@ class Scratch:
     commonset += f"Your name: {self.name}\n"
     commonset += f"Your age: {self.age}\n"
     commonset += f"Your gender: {self.gender}\n"
-    commonset += f"Context of the wider game group: {self.group_context}"
+    commonset += f"Context of the wider game group: {self.group_context}\n"
     commonset += f"Your personality and information: {self.innate}\n"
     #commonset += f"Current Date: {self.curr_time.strftime('%A %B %d')}\n"
     return commonset

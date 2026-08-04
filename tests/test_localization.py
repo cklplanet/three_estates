@@ -1,6 +1,7 @@
 import datetime
 import ast
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -16,12 +17,16 @@ BACKEND_ROOT = (
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from localization import (
+    available_locales,
     display_name,
+    glossary_format_data,
+    localized_string_variants,
     localized_prompt_data,
     localized_prompt_path,
     normalize_locale,
     protocol_display_name,
     tr,
+    validate_localized_natural_language_fields,
 )
 from global_methods import timedelta_to_natural
 from utils import (
@@ -39,11 +44,83 @@ class LocalizationTests(unittest.TestCase):
         self.assertEqual(normalize_locale("ja"), "ja-JP")
         self.assertEqual(normalize_locale("jp"), "ja-JP")
 
+    def test_runtime_context_markers_are_discoverable_across_locales(self):
+        self.assertTrue({"en-US", "zh-CN", "ja-JP"}.issubset(available_locales()))
+        self.assertEqual(
+            localized_string_variants("context.current_game_header"),
+            {
+                "CURRENT-GAME CHARACTER/SCENARIO CONTEXT:",
+                "本局角色／场景背景（当前时间线）：",
+                "今回の人物／シナリオコンテキスト（現在の時間軸）：",
+            },
+        )
+        chinese_priority = tr("context.current_game_priority", locale="zh-CN")
+        self.assertIn("最高权威性", chinese_priority)
+        self.assertIn("事实冲突", chinese_priority)
+
     def test_missing_key_falls_back_to_caller_default(self):
         self.assertEqual(
             tr("missing.example", default="fallback", locale="zh-CN"),
             "fallback",
         )
+
+    def test_glossary_entries_are_available_to_events_and_prompts(self):
+        chinese_glossary = glossary_format_data("zh-CN")
+        self.assertEqual(chinese_glossary["glossary_role_Spinster"], "纺纱女")
+        self.assertEqual(
+            chinese_glossary["glossary_role_card_Spinster"],
+            "纺纱女牌",
+        )
+        self.assertEqual(chinese_glossary["glossary_family_Nobility"], "贵族")
+        self.assertEqual(chinese_glossary["glossary_table_Forest"], "森林")
+        self.assertEqual(
+            tr(
+                "event.spinster.final_guesses",
+                locale="zh-CN",
+                spinster="甲",
+                guesses="乙为国王",
+            ),
+            "甲 作出纺纱女终局角色猜测：乙为国王。",
+        )
+        prompt_data = localized_prompt_data({}, locale="ja-JP")
+        self.assertEqual(prompt_data["glossary_role_card_Priest"], "司祭カード")
+
+    def test_localized_content_reuses_glossary_instead_of_literal_terms(self):
+        for locale in ("zh-CN", "ja-JP"):
+            locale_root = BACKEND_ROOT / "locales" / locale
+            catalog = json.loads(
+                (locale_root / "strings.json").read_text(encoding="utf-8")
+            )
+            glossary_terms = {
+                value
+                for key, value in glossary_format_data(locale).items()
+                if key.startswith(
+                    ("glossary_role_", "glossary_role_card_", "glossary_family_")
+                )
+                # Single-character Japanese labels such as 王 are too broad
+                # to use as a reliable literal-term lint rule.
+                and len(value) > 1
+                and "{" not in value
+            }
+            localized_content = [
+                (key, value)
+                for key, value in catalog.items()
+                if not key.startswith("display.")
+            ]
+            localized_content.extend(
+                (path.name, path.read_text(encoding="utf-8"))
+                for path in (locale_root / "prompts").glob("*.txt")
+            )
+            for source, content in localized_content:
+                without_references = re.sub(
+                    r"\{glossary_[^}]+\}",
+                    "",
+                    content,
+                )
+                leaked_terms = {
+                    term for term in glossary_terms if term in without_references
+                }
+                self.assertFalse(leaked_terms, (locale, source, leaked_terms))
 
     def test_epilogue_count_excludes_blank_separator_lines(self):
         chinese = tr("prompt.epilogue_content_count", locale="zh-CN", count=60)
@@ -121,6 +198,37 @@ class LocalizationTests(unittest.TestCase):
         instruction = tr("prompt.language_instruction", locale="ja-JP")
         self.assertIn("識別値は「夜神 月」", instruction)
         self.assertIn("本文では「夜神月」", instruction)
+
+    def test_localized_dialogue_rejects_predominantly_english_fields(self):
+        payload = {
+            "object": "C.C.",
+            "volume": "calm",
+            "expression": "thin, purposeful smirk",
+            "action": "紫の瞳でテーブルを見渡す",
+            "line": "ここに王がいるなら、名乗り出てもらおうか。",
+        }
+        with self.assertRaisesRegex(ValueError, "expression"):
+            validate_localized_natural_language_fields(payload, locale="ja-JP")
+
+    def test_localized_dialogue_allows_mixed_script_names(self):
+        payload = {
+            "object": "C.C.",
+            "expression": "C.C.への薄笑い",
+            "action": "C.C.を横目で見る",
+            "line": "C.C.、お前も分かっているはずだ。",
+            "reasoning": "C.C.の反応を確かめる。",
+        }
+        self.assertIs(
+            validate_localized_natural_language_fields(payload, locale="ja-JP"),
+            payload,
+        )
+
+    def test_english_locale_does_not_apply_script_validation(self):
+        payload = {"expression": "thin, purposeful smirk"}
+        self.assertIs(
+            validate_localized_natural_language_fields(payload, locale="en-US"),
+            payload,
+        )
 
     def test_non_english_rulebooks_use_bilingual_role_and_family_glossary(self):
         with patch("localization.ACTIVE_LOCALE", "zh-CN"):
@@ -224,7 +332,7 @@ class LocalizationTests(unittest.TestCase):
                 for _literal, field, _spec, _conversion in Formatter().parse(
                     english_value
                 )
-                if field
+                if field and not field.startswith("glossary_")
             }
             for locale in ("zh-CN", "ja-JP"):
                 localized_fields = {
@@ -232,7 +340,7 @@ class LocalizationTests(unittest.TestCase):
                     for _literal, field, _spec, _conversion in Formatter().parse(
                         catalogs[locale][key]
                     )
-                    if field
+                    if field and not field.startswith("glossary_")
                 }
                 self.assertEqual(localized_fields, english_fields, (locale, key))
 

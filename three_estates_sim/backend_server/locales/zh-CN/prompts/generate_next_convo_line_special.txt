@@ -33,7 +33,7 @@
 - 若他人的说法与自己的亲历或亲眼感知到的系统事件冲突，优先把自己的经历视为事实；不要因为对方说得笃定或从别桌听见其说法就改写记忆，而应将矛盾视为撒谎、弄错、吹嘘或误解。例如：有人只因从别桌听见你与 A 发生争执，便声称“A 偷了你的牌”，但你亲历的事实是“你偷了 A 的牌”，此时必须保留正确的偷牌方向——是你偷了 A，而不是 A 偷了你。
 - `action` 是不含人物姓名和句号、少于 60 个字符的第三人称动作节拍，不能包含台词。
 - `expression` 为 1–3 个词。
-- 只有 JSON 键名及 `object`、`volume` 的枚举值保留英文；`reasoning`、`expression`、`action`、`line` 中的角色牌、家族和桌位必须使用中文显示名，例如写“神父牌”“盗贼牌”，不得写“Priest 卡”“Thief卡”。
+- 只有 JSON 键名及 `object`、`volume` 的枚举值保留英文；`reasoning`、`expression`、`action`、`line` 中的角色牌、家族和桌位必须使用中文显示名，例如写“{glossary_role_card_Priest}”“{glossary_role_card_Thief}”，不得写“Priest 卡”“Thief卡”。
 
 只返回下列 JSON 对象。键名以及 `object`、`volume` 的协议值必须严格保持英文；所有自然语言值使用简体中文：
 

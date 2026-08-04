@@ -4,6 +4,7 @@ GAME CONTEXT:
 {personal_context_msg}
 
 The game timers have all expired. You are the Spinster, and before win accounting happens you must make your endgame role guesses for every other player at your final table.
+If there is no other player at your final table, you make no guesses and trivially satisfy the Spinster win condition.
 
 Players at your final table that you must guess:
 {target_list}

@@ -6,7 +6,7 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 from paths import DEFAULT_SESSION_DIR, FRONTEND_SERVER_ROOT, PROJECT_ROOT, SESSIONS_ROOT
-from localization import display_name, protocol_display_name, tr
+from localization import available_locales, display_name, protocol_display_name, tr
 
 def read_local_env_value(key):
     for env_path in (PROJECT_ROOT / ".env.local", PROJECT_ROOT / ".env"):
@@ -180,7 +180,7 @@ ROLE_DICT = {
     "Spinster": {
         "family": "Commoners",
         "ability": "When leaving the Forest (NOT immune to Forest timer lockdown), can choose to point to a player there; immune to Baron's block and steal while doing so due to being no longer present. After leaving, that player must reveal their role to everyone else in the Forest (not including the Spinster).",
-        "win_condition": "If all other players' roles at the Spinster's final table at game end are guessed correctly. In the event of this the win conditions of all other players' at said table are reversed."
+        "win_condition": "Wins if all other players' roles at the Spinster's final table at game end are guessed correctly. If there is no other player at that table, the Spinster trivially wins without making any guesses. When the Spinster wins, the win/loss results of all other players at that table are reversed."
     },
     "Bishop": {
         "family": "Clergy",
@@ -704,7 +704,61 @@ def role_family_terms():
         else:
             terms.add(f"{role_lower}s")
     terms.update({"thieves"})
+    families = {role_data["family"] for role_data in ROLE_DICT.values()}
+    for locale in available_locales():
+        for role in ROLE_DICT:
+            terms.add(display_name("role", role, locale=locale).casefold())
+            terms.add(display_name("role_card", role, locale=locale).casefold())
+        for family in families:
+            terms.add(display_name("family", family, locale=locale).casefold())
     return terms
+
+
+_CJK_PATTERN = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]"
+)
+_HAN_PATTERN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def contains_cjk(text):
+    return bool(_CJK_PATTERN.search(str(text or "")))
+
+
+def compact_cjk_spacing(text):
+    """Ignore identity-only Japanese name spaces during natural-text matching."""
+    return re.sub(r"\s+", "", str(text or "").casefold())
+
+
+def contains_localized_term(haystack, term):
+    """Match Latin terms by word boundaries and CJK terms by compact text."""
+    term = str(term or "").strip().casefold()
+    if not term:
+        return False
+    haystack = str(haystack or "").casefold()
+    if contains_cjk(term):
+        compact_term = compact_cjk_spacing(term)
+        compact_haystack = compact_cjk_spacing(haystack)
+        if len(compact_term) == 1 and _HAN_PATTERN.fullmatch(compact_term):
+            return re.search(
+                rf"(?<![\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])"
+                rf"{re.escape(compact_term)}"
+                rf"(?![\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff])",
+                compact_haystack,
+            ) is not None
+        return compact_term in compact_haystack
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", haystack) is not None
+
+
+def matches_localized_event_template(text, key):
+    """Match rendered event text against any installed locale's template."""
+    text = str(text or "").strip()
+    for locale in available_locales():
+        template = tr(key, locale=locale).strip()
+        pattern = re.escape(template)
+        pattern = re.sub(r"\\\{[^{}]+\\\}", r".+?", pattern)
+        if re.fullmatch(pattern, text, flags=re.DOTALL):
+            return True
+    return False
 
 
 def casual_conversation_transition_time():
@@ -777,9 +831,18 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     object_text = str(obj or "")
 
     if event_type == "chat":
-        return deterministic_chat_poignancy_score(persona, description, subject, obj)
+        return deterministic_chat_poignancy_score(
+            persona,
+            description,
+            subject,
+            obj,
+            keywords=keywords,
+        )
 
-    if "is idle" in lower:
+    if "is idle" in lower or matches_localized_event_template(
+        text_without_audience,
+        "event.table.stays_quiet",
+    ):
         return 1
     if (
         subject_text.lower() == "system"
@@ -787,6 +850,10 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
             "the table falls quiet" in lower
             or "no action bid was strong enough" in lower
             or "everyone is still waiting for space to speak" in lower
+            or matches_localized_event_template(
+                text_without_audience,
+                "event.table.no_action",
+            )
         )
     ):
         return 1
@@ -807,16 +874,31 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
         r"\bleaves for\b",
         r"\barrives from\b",
     ]
-    is_movement = any(re.search(pattern, lower) for pattern in movement_patterns)
-    has_proof_or_ability = any(re.search(pattern, lower) for pattern in high_proof_patterns)
+    is_movement = (
+        any(re.search(pattern, lower) for pattern in movement_patterns)
+        or matches_localized_event_template(text_without_audience, "event.movement.departure")
+        or matches_localized_event_template(text_without_audience, "event.movement.arrival")
+    )
+    canonical_role_keywords = {
+        role.casefold() for role in ROLE_DICT
+    } | {
+        role_data["family"].casefold() for role_data in ROLE_DICT.values()
+    }
+    keyword_tokens = {
+        str(keyword).casefold()
+        for keyword in (keywords | event_role_keywords_from_text(text_without_audience))
+    }
+    has_proof_or_ability = (
+        any(re.search(pattern, lower) for pattern in high_proof_patterns)
+        or bool(keyword_tokens & canonical_role_keywords)
+    )
 
     if is_movement and not has_proof_or_ability:
         return 1
 
     if persona_name:
-        persona_lower = persona_name.lower()
         direct_participants = {subject_text, object_text}
-        directly_named = persona_lower in lower
+        directly_named = contains_localized_term(lower, persona_name)
         directly_involved = persona_name in direct_participants
         if event_type != "chat" and persona_name in keywords:
             directly_involved = True
@@ -848,7 +930,13 @@ def heuristic_poignancy_score(persona, event_type, description, subject=None, ob
     return 2
 
 
-def deterministic_chat_poignancy_score(persona, description, subject=None, obj=None):
+def deterministic_chat_poignancy_score(
+    persona,
+    description,
+    subject=None,
+    obj=None,
+    keywords=None,
+):
     """Cheap deterministic importance score for dialogue memories."""
     if isinstance(persona, str):
         persona_name = persona
@@ -875,21 +963,29 @@ def deterministic_chat_poignancy_score(persona, description, subject=None, obj=N
     object_text = str(obj or "")
 
     roles_and_families = role_family_terms()
-
-    def contains_term(haystack, term):
-        if not term:
-            return False
-        return re.search(rf"(?<!\w){re.escape(str(term).lower())}(?!\w)", haystack) is not None
+    canonical_role_keywords = {
+        role.casefold() for role in ROLE_DICT
+    } | {
+        role_data["family"].casefold() for role_data in ROLE_DICT.values()
+    }
+    keyword_tokens = {str(keyword).casefold() for keyword in (keywords or set())}
 
     def name_aliases(name):
-        aliases = {str(name or "").strip()}
-        parts = re.split(r"\s+", str(name or "").strip())
+        name = str(name or "").strip()
+        aliases = {name}
+        if contains_cjk(name):
+            aliases.add(compact_cjk_spacing(name))
+            return {alias for alias in aliases if alias}
+        parts = re.split(r"\s+", name)
         aliases.update(part for part in parts if len(part) >= 3)
         return {alias for alias in aliases if alias}
 
-    has_role_or_family = any(contains_term(body_lower, term) for term in roles_and_families)
+    has_role_or_family = (
+        bool(keyword_tokens & canonical_role_keywords)
+        or any(contains_localized_term(body_lower, term) for term in roles_and_families)
+    )
     own_name_mentioned = bool(persona_name) and (
-        any(contains_term(body_lower, alias) for alias in name_aliases(persona_name))
+        any(contains_localized_term(body_lower, alias) for alias in name_aliases(persona_name))
         or object_text == persona_name
     )
 
@@ -897,7 +993,7 @@ def deterministic_chat_poignancy_score(persona, description, subject=None, obj=N
     for name in all_names:
         if not name or name == persona_name:
             continue
-        if any(contains_term(body_lower, alias) for alias in name_aliases(name)):
+        if any(contains_localized_term(body_lower, alias) for alias in name_aliases(name)):
             other_names_mentioned = True
             break
 
@@ -1333,20 +1429,20 @@ def role_keywords_from_text(text):
     lower = str(text or "").lower()
     keywords = set()
     for role, role_data in ROLE_DICT.items():
-        if re.search(rf"(?<!\w){re.escape(role.lower())}(?!\w)", lower):
-            keywords.add(role)
-            keywords.add(role_data["family"])
-        localized_role = display_name("role", role).casefold()
-        if localized_role != role.casefold() and localized_role in lower:
+        role_terms = {role.casefold()}
+        for locale in available_locales():
+            role_terms.add(display_name("role", role, locale=locale).casefold())
+            role_terms.add(display_name("role_card", role, locale=locale).casefold())
+        if any(contains_localized_term(lower, term) for term in role_terms):
             keywords.add(role)
             keywords.add(role_data["family"])
     for family in {"Nobility", "Commoners", "Clergy"}:
-        localized_family = display_name("family", family).casefold()
-        if (
-            family.lower() in lower
-            or family.rstrip("s").lower() in lower
-            or (localized_family != family.casefold() and localized_family in lower)
-        ):
+        family_terms = {family.casefold(), family.rstrip("s").casefold()}
+        family_terms.update(
+            display_name("family", family, locale=locale).casefold()
+            for locale in available_locales()
+        )
+        if any(contains_localized_term(lower, term) for term in family_terms):
             keywords.add(family)
     return keywords
 
@@ -1366,8 +1462,14 @@ def event_role_keywords_from_text(text):
         if any(re.search(pattern, lower) for pattern in role_patterns):
             keywords.add(role)
             keywords.add(role_data["family"])
-        localized_role = display_name("role", role).casefold()
-        if localized_role != role.casefold() and localized_role in lower:
+        localized_role_terms = set()
+        for locale in available_locales():
+            localized_role_terms.add(display_name("role", role, locale=locale).casefold())
+            localized_role_terms.add(display_name("role_card", role, locale=locale).casefold())
+        if any(
+            contains_localized_term(lower, term)
+            for term in localized_role_terms
+        ):
             keywords.add(role)
             keywords.add(role_data["family"])
     for family in {"Nobility", "Commoners", "Clergy"}:
@@ -1382,8 +1484,14 @@ def event_role_keywords_from_text(text):
         ]
         if any(re.search(pattern, lower) for pattern in family_patterns):
             keywords.add(family)
-        localized_family = display_name("family", family).casefold()
-        if localized_family != family.casefold() and localized_family in lower:
+        localized_family_terms = {
+            display_name("family", family, locale=locale).casefold()
+            for locale in available_locales()
+        }
+        if any(
+            contains_localized_term(lower, term)
+            for term in localized_family_terms
+        ):
             keywords.add(family)
     return keywords
 
